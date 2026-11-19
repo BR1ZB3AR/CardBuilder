@@ -14,7 +14,7 @@ postcards and invitations, folded greeting cards, tent and place cards, bookmark
 see them in 3D, in real card stock, as you go. When you're done, print them: vector PDFs with
 bleed, crop marks and the backs lined up for double-sided printing.
 
-![CardBuilder: a folded greeting card in the editor on the left, standing open in 3D in the middle, the design panel on the right](docs/cardbuilder-1440.png)
+![CardBuilder: both sides of a business card in the editor on the left, the card in 3D on gloss stock in the middle, the Scene panel on the right](docs/cardbuilder-1920.png)
 
 ## Features
 
