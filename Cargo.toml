@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/cb-core", "crates/cb-print", "crates/cardbuilder"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/BR1ZB3AR/CardBuilder"
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] } # exact numbers when designs are read back
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# keep debug builds usable: card rendering runs on every edit
+[profile.dev.package."*"]
+opt-level = 2
+[profile.dev.package.cb-core]
+opt-level = 2
+[profile.dev.package.cb-print]
+opt-level = 2

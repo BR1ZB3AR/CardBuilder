@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=CardBuilder
+GenericName=Card designer
+Comment=Design business cards, greeting cards, game cards and more
+Exec=cardbuilder %F
+Icon=cardbuilder
+Terminal=false
+Categories=Graphics;2DGraphics;
+Keywords=card;business card;greeting card;invitation;postcard;playing card;trading card;id card;qr;print;design;
+StartupWMClass=cardbuilder
+MimeType=application/x-cardbuilder;

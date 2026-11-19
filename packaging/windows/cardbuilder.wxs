@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CardBuilder Windows installer (WiX Toolset 5). Built by .github/workflows/release-windows.yml:
+
+    wix build packaging/windows/cardbuilder.wxs -arch x64 -d Version=0.0.15 -d ExePath=target/release/cardbuilder.exe
+              -d IconPath=crates/cardbuilder/assets/cardbuilder.ico -o CardBuilder-x86_64.msi
+
+  Installs CardBuilder.exe into Program Files, adds a Start menu entry and opens .cb design files
+  with CardBuilder. A newer installer replaces an older installation (same UpgradeCode — never
+  change it); "Apps & features" uninstalls it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="CardBuilder"
+           Manufacturer="BR1ZB3AR"
+           Version="$(var.Version)"
+           UpgradeCode="d7a52665-f398-4974-862d-75e7467e4597"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="CardBuilder — design cards of every kind" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of CardBuilder is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- the .ico, not the .exe: an Icon is stored whole and uncompressed in the installer; the Id's
+         extension tells Windows how to read it -->
+    <Icon Id="CardBuilder.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="CardBuilder.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/BR1ZB3AR/CardBuilder" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/BR1ZB3AR/CardBuilder/issues" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="CardBuilder">
+        <Component Id="App">
+          <File Id="CardBuilderExe" Source="$(var.ExePath)" Name="CardBuilder.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut"
+                      Directory="ProgramMenuFolder"
+                      Name="CardBuilder"
+                      Description="Design cards of every kind"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="CardBuilder.ico"
+                      Advertise="yes" />
+          </File>
+          <!-- .cb design files open in CardBuilder (double-click in Explorer) -->
+          <ProgId Id="CardBuilder.Design" Description="CardBuilder design" Icon="CardBuilderExe" IconIndex="0" Advertise="no">
+            <Extension Id="cb" ContentType="application/x-cardbuilder">
+              <Verb Id="open" Command="Open" TargetFile="CardBuilderExe" Argument="&quot;%1&quot;" />
+            </Extension>
+          </ProgId>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="CardBuilder" Level="1">
+      <ComponentRef Id="App" />
+    </Feature>
+  </Package>
+</Wix>

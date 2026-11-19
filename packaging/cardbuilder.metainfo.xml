@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>cardbuilder</id>
+  <name>CardBuilder</name>
+  <summary>Design business cards, greeting cards, game cards and more</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>Design cards of every kind — business cards, ID and gift cards, playing and trading cards,
+    postcards and invitations, folded greeting cards, tent and place cards, bookmarks and tags —
+    with a live 3D preview in real card stocks, foil and spot UV, QR codes, batch cards from a
+    spreadsheet, and print-ready vector PDFs with crop marks and double-sided imposition.</p>
+  </description>
+  <launchable type="desktop-id">cardbuilder.desktop</launchable>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

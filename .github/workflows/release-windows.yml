@@ -1,0 +1,76 @@
+name: Release Windows
+
+# When a release is published, build the Windows installer and attach it to that release as
+# CardBuilder-x86_64.msi (Program Files, Start menu, .cb files open in CardBuilder). The name has
+# no version in it, so .../releases/latest/download/CardBuilder-x86_64.msi always fetches the newest.
+# Run it by hand without a tag for a test build; the installer is then kept as a workflow artifact.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach the Windows files to (empty = test build of the chosen branch)
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG || github.ref }}
+
+      - name: Version (and it matches the tag)
+        run: |
+          v=$(grep -m1 '^version' crates/cardbuilder/Cargo.toml | cut -d'"' -f2)
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          if [ -n "$TAG" ] && [ "v$v" != "$TAG" ]; then
+            echo "::error::crates/cardbuilder/Cargo.toml says $v, but the release tag is $TAG"
+            exit 1
+          fi
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Build
+        run: cargo build --release --locked -p cardbuilder
+
+      - name: Installer .msi (WiX 5)
+        run: |
+          mkdir -p dist
+          dotnet tool install --global wix --version 5.0.2
+          export PATH="$PATH:$USERPROFILE/.dotnet/tools"
+          wix build packaging/windows/cardbuilder.wxs -arch x64 \
+            -d "Version=$VERSION" -d "ExePath=target/release/cardbuilder.exe" \
+            -d "IconPath=crates/cardbuilder/assets/cardbuilder.ico" \
+            -o "dist/CardBuilder-x86_64.msi"
+          rm -f dist/*.wixpdb
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CardBuilder-${{ env.VERSION }}-windows
+          path: dist/
+
+      - name: Attach to the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/CardBuilder-x86_64.msi --clobber

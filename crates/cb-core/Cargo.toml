@@ -1,0 +1,11 @@
+[package]
+name = "cb-core"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CardBuilder core: card formats, the design model, data merge, print imposition, 3D card meshes (no UI)"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

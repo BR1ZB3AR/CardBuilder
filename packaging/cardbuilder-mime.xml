@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CardBuilder design files (.cb): installed by install-desktop.sh so file managers show them
+     with the CardBuilder icon and open them in CardBuilder on double-click. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-cardbuilder">
+    <comment>CardBuilder design</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="cardbuilder"/>
+    <glob pattern="*.cb"/>
+    <magic priority="60">
+      <match type="string" offset="0:64" value="&quot;format&quot;: &quot;cardbuilder-design&quot;"/>
+    </magic>
+  </mime-type>
+</mime-info>
