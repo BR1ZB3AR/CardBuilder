@@ -15,7 +15,13 @@ fn main() {
     }
     let mut imgs = ImageCache::default();
     for id in ids {
-        let mut doc = default_doc(CardFormat::from_preset(preset(&id).expect("preset id")));
+        // a preset id, or a .cb design file
+        let mut doc = if id.ends_with(".cb") {
+            cb_core::doc::load_design(&std::fs::read_to_string(&id).expect("read design")).expect("a CardBuilder design")
+        } else {
+            default_doc(CardFormat::from_preset(preset(&id).expect("preset id")))
+        };
+        let id = std::path::Path::new(&id).file_stem().unwrap().to_string_lossy().replace(' ', "-");
         imgs.prepare(cb_print::image_srcs(&doc));
         for side in [Side::Front, Side::Back] {
             let png = cb_print::sheets::side_png(&doc, side, None, 300.0, true, &imgs).unwrap();

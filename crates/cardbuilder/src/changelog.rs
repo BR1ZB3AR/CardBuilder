@@ -10,6 +10,94 @@ pub type Release = (
 
 pub const CHANGELOG: &[Release] = &[
     (
+        "0.0.11",
+        "2026-11-19",
+        "Named text layers",
+        &[
+            ("improved", "The Layers list shows what a template's text layers are for along with their words, such as Number · 1 or Title · <INSERT NAME>, so the biocard numbers are easy to find. Editing the words keeps that name."),
+        ],
+    ),
+    (
+        "0.0.10",
+        "2026-11-19",
+        "Outlined text",
+        &[
+            ("new", "Text can have an outline: Text › Outline sets its colour and width. Turn Fill off for outline-only lettering, like the big numbers on the Ingress biocards, which are now text you can retype or delete."),
+        ],
+    ),
+    (
+        "0.0.9",
+        "2026-11-19",
+        "A new business card, and fresh cards from the picker",
+        &[
+            ("new", "A new business card to start from: white, with the company name in two weights, a teal-to-blue wave along the bottom with the website, and on the back the name, job title and contact rows with icons. It fits every business card size."),
+            ("improved", "Leaving a card that has a look of its own, such as an Ingress biocard template, for another kind of card starts a fresh card of that kind, so the biocard's artwork and Faction buttons don't come along. It asks first if there are unsaved changes, and Ctrl+Z brings the old card back. Other size changes still keep your layout."),
+            ("fixed", "Each kind of card keeps its own place in the card picker's list. Before, switching kinds could open the new list scrolled down, past its first cards."),
+        ],
+    ),
+    (
+        "0.0.8",
+        "2026-11-19",
+        "Faction buttons",
+        &[
+            ("new", "A design can offer a choice as coloured buttons at the top of the Design tab. The Ingress biocard templates use it for the faction: RES, ENL or XFAC each show their own logo layers and set the faction colour, in one click that Ctrl+Z undoes."),
+        ],
+    ),
+    (
+        "0.0.7",
+        "2026-11-19",
+        "Sharper card editor, Exo font",
+        &[
+            ("improved", "The card editor is sharper. Once you stop zooming, it draws the card at exactly the screen's resolution, one pixel for one pixel, so text and fine lines look crisp instead of slightly soft."),
+            ("new", "The Exo font comes with CardBuilder, in every weight from Thin to Black. It's the lettering of the 2024 Ingress biocards."),
+            ("improved", "Opening a group in the card picker scrolls it into view, so all of its cards show. The picker also opens scrolled to the card you're working on."),
+        ],
+    ),
+    (
+        "0.0.6",
+        "2026-11-19",
+        "Card fronts in the picker",
+        &[
+            ("new", "The card picker shows each template's front, and the starter design of each card in a group, as a small picture next to its name, so you can see an Ingress Biocard before you pick it."),
+            ("new", "The Coda font comes with CardBuilder (regular and extra bold), the lettering of the classic agent cards."),
+            ("improved", "A template on this computer named like a built-in card takes its place in the picker. For example, an Enlightened or Resistance biocard template replaces the plain starter of the same name."),
+            ("fixed", "A long card name in the sidebar ran under the Change… button. It is now cut short, and hovering it shows the whole name."),
+        ],
+    ),
+    (
+        "0.0.5",
+        "2026-11-19",
+        "Ingress Biocard group, templates and your own fonts",
+        &[
+            ("new", "Playing & game cards has an Ingress Biocard group — click its heading to open it: Enlightened, Resistance, and any biocard templates on this computer, such as the 2023 Origin card."),
+            ("new", "Local templates: designs in CardBuilder's templates folder show in the card picker, in their own category and group. Picking one starts a new card from it; New (Ctrl+N) starts afresh from the same template. Export › Save as template… adds your own."),
+            ("new", "Your own fonts: Font › Add a font file… takes a .ttf or .otf; it travels inside the .cb design, so the card opens with it anywhere."),
+            ("new", "Text frames: a text box can keep its height with the text at its top, middle or bottom (Text › Text box) — for description panels that shouldn't move when the text gets longer. Drag its top and bottom handles to resize it."),
+            ("improved", "The Enlightened and Resistance biocards are named by faction inside their group."),
+            ("fixed", "A click on the last row of the card picker could close it instead of choosing the row, right after a group was opened."),
+        ],
+    ),
+    (
+        "0.0.4",
+        "2026-11-19",
+        "Front and back on one page",
+        &[
+            ("new", "The card editor shows both sides at once — front and back, or the outside and inside of a folded card — side by side or one above the other, whichever shows them bigger. Click anything on either side to edit it; the side you are working on is highlighted, and the sidebar's Add, Layers and Background follow it. The Front / Back switch is gone."),
+            ("improved", "On folded cards the panel names (Front cover, Inside left …) sit inside each panel."),
+            ("fixed", "Trying other sizes in the card picker shrank the artwork a little more with every switch (a business card, then a portrait card, then back left the name tiny and pushed aside). Browsing sizes now always starts from your layout, so coming back restores it exactly."),
+            ("fixed", "The card picker stretched to the bottom of the window and, with longer lists, crept upwards so a click could hit the row below. It is as tall as its contents again (so is the Print dialog's divider)."),
+        ],
+    ),
+    (
+        "0.0.3",
+        "2026-11-19",
+        "The back of the card in 3D",
+        &[
+            ("new", "The 3D preview shows flat cards as a pair, like a business-card mockup: one card shows the front, the one beside it is turned to show the back — so both sides are in view at once. The new button in the 3D bar (or Scene › Front and back side by side) switches back to one card."),
+            ("fixed", "Turning a card round in 3D showed its back dim and grey, because the studio light stayed in front of the card. The light now turns with the camera, so whichever side you look at is lit."),
+        ],
+    ),
+    (
         "0.0.2",
         "2026-11-19",
         "Ingress agent biocards",

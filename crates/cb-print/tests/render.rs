@@ -98,3 +98,85 @@ fn text_placeholders_follow_the_record() {
     assert_ne!(a.data(), b.data());
     assert_ne!(a.data(), raw.data());
 }
+
+#[test]
+fn business_card_starter_fits_every_size() {
+    // every business card size: no text has to shrink to fit its box, every box is on the card,
+    // and the two-word names keep one size
+    for p in PRESETS.iter().filter(|p| p.category == cb_core::format::Category::Business) {
+        let d = default_doc(CardFormat::from_preset(p));
+        let (w, h) = d.format.sheet();
+        for l in d.layers.iter().filter(|l| l.kind == cb_core::LayerType::Text) {
+            let text = l.text.clone().unwrap_or_default();
+            if !l.wrap.unwrap_or(false) {
+                let natural = cb_print::text::natural_width(l, &text);
+                assert!(natural <= l.w + 1e-6, "{}: {text:?} is {natural:.2} mm in a {:.2} mm box", p.id, l.w);
+            }
+            assert!(l.x - l.w / 2.0 >= -1e-6 && l.x + l.w / 2.0 <= w + 1e-6, "{}: {text:?} box runs off the card", p.id);
+            assert!(l.y > 0.0 && l.y < h, "{}: {text:?} off the card", p.id);
+        }
+        for (a, b) in [("COMPANY", "NAME"), ("JOHN", "DOE")] {
+            for side in [Side::Front, Side::Back] {
+                let find = |t: &str| d.layers.iter().find(|l| l.side == side && l.text.as_deref() == Some(t)).map(|l| l.size);
+                if let (Some(x), Some(y)) = (find(a), find(b)) {
+                    assert_eq!(x, y, "{}: {a} {b}", p.id);
+                }
+            }
+        }
+        let imgs = {
+            let mut c = ImageCache::default();
+            c.prepare(cb_print::image_srcs(&d));
+            c
+        };
+        for side in [Side::Front, Side::Back] {
+            let pm = render_side(&d, side, &DrawOptions::preview(None), 6.0, false, &imgs).unwrap();
+            if let Ok(dir) = std::env::var("CB_SCREENSHOT_DIR") {
+                std::fs::create_dir_all(&dir).unwrap();
+                pm.save_png(format!("{dir}/biz-{}-{side:?}.png", p.id)).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn outlined_text_leaves_the_letters_open() {
+    let mut d = default_doc(CardFormat::from_preset(preset("bc-eu").unwrap()));
+    d.layers.clear();
+    d.front = cb_core::doc::Background { mode: cb_core::doc::BgMode::Solid, color: "#ffffff".into(), ..Default::default() };
+    let mut l = Layer::text(Side::Front, 42.5, 27.5, 60.0, "I", "Exo", 900.0, 150.0, "#00000000", cb_core::doc::Align::Center);
+    l.stroke = Some("#000000".into());
+    l.stroke_w = Some(0.4);
+    d.layers.push(l.clone());
+    let imgs = ImageCache::default();
+    let dark = |d: &cb_core::Doc| {
+        let pm = render_side(d, Side::Front, &DrawOptions::preview(None), 8.0, false, &imgs).unwrap();
+        let px = pm.pixels();
+        let mid = px[(pm.height() as usize / 2) * pm.width() as usize + pm.width() as usize / 2];
+        (px.iter().filter(|p| p.red() < 100).count(), mid.red())
+    };
+    let (n, mid) = dark(&d);
+    assert!(n > 200, "the outline shows ({n} dark pixels)");
+    assert!(mid > 200, "the inside of the I stays open");
+    // filled, no outline: the middle is ink
+    d.layers[0].color = Some("#000000".into());
+    d.layers[0].stroke_w = Some(0.0);
+    assert!(dark(&d).1 < 50, "a filled I");
+}
+
+/// A design file rendered to PNGs (both sides, bleed included):
+/// `CB_RENDER_FILE=card.cb CB_SCREENSHOT_DIR=out cargo test -p cb-print --test render -- --ignored render_a_file`
+#[test]
+#[ignore = "a tool: renders the file named by CB_RENDER_FILE"]
+fn render_a_file() {
+    let Ok(file) = std::env::var("CB_RENDER_FILE") else { return };
+    let dir = std::env::var("CB_SCREENSHOT_DIR").unwrap_or_else(|_| ".".into());
+    let ppm: f64 = std::env::var("CB_RENDER_PPM").ok().and_then(|v| v.parse().ok()).unwrap_or(600.0 / 25.4);
+    let d = cb_core::doc::load_design(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let mut imgs = ImageCache::default();
+    imgs.prepare(cb_print::image_srcs(&d));
+    let stem = std::path::Path::new(&file).file_stem().unwrap().to_string_lossy().to_string();
+    for side in [Side::Front, Side::Back] {
+        let pm = render_side(&d, side, &DrawOptions::preview(None), ppm, false, &imgs).unwrap();
+        pm.save_png(format!("{dir}/{stem}-{side:?}.png")).unwrap();
+    }
+}

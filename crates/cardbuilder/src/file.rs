@@ -20,6 +20,10 @@ pub(crate) enum After {
     OpenPath(PathBuf),
     /// a file that arrived as bytes only (web drop): name, contents
     OpenText(String, String),
+    /// start a new design from a local template
+    Template(PathBuf),
+    /// start a fresh card of another kind (from the card picker)
+    Fresh(cb_core::format::CardFormat),
 }
 
 /// The file behind the design on screen.
@@ -135,10 +139,44 @@ impl CardBuilderApp {
             After::OpenText(name, text) => {
                 self.open_design_text(&name, &text, None, now);
             }
+            After::Template(p) => self.open_template(&p, now),
+            After::Fresh(f) => self.fresh_design(f, now),
         }
     }
 
+    /// a fresh card of another kind (asks first if there are unsaved changes)
+    pub(crate) fn request_fresh(&mut self, f: cb_core::format::CardFormat, now: f64) {
+        self.when_saved_or_discarded(After::Fresh(f), now);
+    }
+
+    fn fresh_design(&mut self, f: cb_core::format::CardFormat, now: f64) {
+        let fresh = default_doc(f);
+        let before = std::mem::replace(&mut self.doc, fresh.clone());
+        self.history.record(&before, None, now);
+        self.selected = None;
+        self.record = 0;
+        self.side = cb_core::Side::Front;
+        self.file.path = None;
+        self.file.baseline = fresh;
+        self.prefs.last_file = None;
+        self.format_origin = None;
+        self.custom = crate::formats::CustomDraft::from(&self.doc.format);
+        self.canvas.request_fit();
+        self.viewer.reset_view();
+        let name = self.format_title();
+        self.say(format!("New card: {name} — Ctrl+Z brings the previous design back"), now);
+    }
+
+    /// a card from a local template (asks first if there are unsaved changes)
+    pub(crate) fn request_template(&mut self, path: PathBuf, now: f64) {
+        self.when_saved_or_discarded(After::Template(path), now);
+    }
+
     fn new_design(&mut self, now: f64) {
+        // a design from a template starts afresh from that template
+        if let Some(path) = self.current_template().map(|t| t.path.clone()) {
+            return self.open_template(&path, now);
+        }
         let fresh = default_doc(self.doc.format.clone());
         let before = std::mem::replace(&mut self.doc, fresh.clone());
         self.history.record(&before, None, now);
@@ -291,7 +329,7 @@ impl CardBuilderApp {
         let mut cancel = false;
         let mut choice: Option<bool> = None; // Some(true) save, Some(false) don't save
         let what = match after {
-            After::New => "starting a new design",
+            After::New | After::Template(_) | After::Fresh(_) => "starting a new design",
             _ => "opening another design",
         };
         let title = format!("Save changes to {}?", self.file.name());

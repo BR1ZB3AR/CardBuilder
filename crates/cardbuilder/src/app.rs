@@ -130,6 +130,13 @@ pub struct Popups {
     pub theme_kind: Option<u8>,
     /// card category shown in the format picker
     pub format_cat: Option<cb_core::format::Category>,
+    /// groups opened or closed in the format picker (by name)
+    pub groups: std::collections::HashMap<String, bool>,
+    /// a group just opened in the format picker: scrolled into view once its cards are shown
+    pub scroll_group: Option<String>,
+    /// the format picker has been on screen since it last opened (it scrolls to the current
+    /// card when it opens)
+    pub format_seen: bool,
 }
 
 pub struct CardBuilderApp {
@@ -161,6 +168,16 @@ pub struct CardBuilderApp {
     pub(crate) focus_text: bool,
     /// the custom size being typed in the format picker
     pub(crate) custom: crate::formats::CustomDraft,
+    /// Browsing formats: the format and artwork before the first switch, and the artwork the
+    /// last switch produced. While nothing is edited in between, every switch starts from the
+    /// original, so trying sizes and coming back gives the same layout (no compounding).
+    pub(crate) format_origin: Option<(CardFormat, Vec<Layer>, Vec<Layer>)>,
+    /// local templates (the card picker lists them)
+    pub(crate) templates: Vec<crate::templates::LocalTemplate>,
+    /// design fonts already given to egui (for the font menu's previews)
+    pub(crate) egui_fonts: std::collections::HashSet<String>,
+    /// card picker thumbnails
+    pub(crate) thumbs: crate::thumbs::Thumbs,
 }
 
 impl CardBuilderApp {
@@ -204,6 +221,10 @@ impl CardBuilderApp {
             clipboard: Vec::new(),
             focus_text: false,
             custom,
+            format_origin: None,
+            templates: crate::templates::scan(),
+            egui_fonts: Default::default(),
+            thumbs: Default::default(),
         }
     }
 
@@ -411,10 +432,17 @@ impl CardBuilderApp {
         if to == self.doc.format {
             return;
         }
-        let from = self.doc.format.clone();
+        // start from the layout before browsing began, unless it has been edited since
+        let (from, layers) = match &self.format_origin {
+            Some((f0, l0, last)) if *last == self.doc.layers => (f0.clone(), l0.clone()),
+            _ => (self.doc.format.clone(), self.doc.layers.clone()),
+        };
         let to2 = to.clone();
+        let remapped = if to2 == from { layers.clone() } else { cb_core::doc::remap_layers(&layers, &from, &to2) };
+        self.format_origin = Some((from.clone(), layers, remapped.clone()));
+        let from = self.doc.format.clone();
         self.edit(now, None, |d| {
-            d.layers = cb_core::doc::remap_layers(&d.layers, &from, &to2);
+            d.layers = remapped;
             if from.fold != to2.fold {
                 d.scene.open = cb_core::doc::default_open(to2.fold);
             }
@@ -444,7 +472,7 @@ impl CardBuilderApp {
     }
     /// screen position of a design point (mm) in the card editor
     pub fn card_point_for_tests(&self, x: f64, y: f64) -> egui::Pos2 {
-        self.canvas.to_screen(x, y)
+        self.canvas.to_screen(self.side, x, y)
     }
     /// switch the layout: "card", "split" or "3d"
     pub fn set_layout(&mut self, layout: &str) {
@@ -456,6 +484,10 @@ impl CardBuilderApp {
     }
     pub fn set_side_for_tests(&mut self, back: bool) {
         self.side = if back { Side::Back } else { Side::Front };
+    }
+    /// the last message shown at the bottom of the window
+    pub fn status_for_tests(&self) -> Option<String> {
+        self.status.as_ref().map(|s| s.0.clone())
     }
     pub fn editor_ready_for_tests(&self) -> bool {
         self.canvas.has_texture(self.side)
@@ -572,7 +604,7 @@ impl CardBuilderApp {
         if pressed(Key::Escape) {
             self.selected = None;
             self.tool = Tool::Select;
-            self.popups = Popups { format_cat: self.popups.format_cat, ..Popups::default() };
+            self.popups = Popups { format_cat: self.popups.format_cat, groups: std::mem::take(&mut self.popups.groups), ..Popups::default() };
         }
         for (k, t) in [(Key::V, Tool::Select), (Key::H, Tool::Hand), (Key::T, Tool::Text), (Key::R, Tool::Shape), (Key::I, Tool::Image), (Key::Q, Tool::Qr)] {
             if pressed(k) {
@@ -700,6 +732,29 @@ impl CardBuilderApp {
         }
     }
 
+    /// Fonts the design carries: available for drawing and measuring text, and in egui for the
+    /// font menu's previews.
+    fn sync_design_fonts(&mut self, ctx: &egui::Context) {
+        cb_print::text::register_fonts(&self.doc.fonts);
+        for f in &self.doc.fonts {
+            if self.egui_fonts.contains(&f.family) || cb_print::text::is_bundled(&f.family) {
+                continue;
+            }
+            let Some(bytes) = cb_print::text::custom_font(&f.family) else { continue };
+            ctx.add_font(egui::epaint::text::FontInsert::new(
+                &format!("design-{}", f.family),
+                egui::FontData::from_static(bytes),
+                vec![egui::epaint::text::InsertFontFamily { family: egui::FontFamily::Name(f.family.clone().into()), priority: egui::epaint::text::FontPriority::Highest }],
+            ));
+            self.egui_fonts.insert(f.family.clone());
+        }
+    }
+
+    /// a font egui can show its name in (bundled, or a design font already given to egui)
+    pub(crate) fn previewable_font(&self, family: &str) -> bool {
+        cb_print::text::is_bundled(family) || self.egui_fonts.contains(family)
+    }
+
     /// a message at the bottom of the window for a few seconds (and export progress)
     fn toast(&self, ctx: &egui::Context, now: f64) {
         let progress = self.jobs.progress();
@@ -740,6 +795,7 @@ impl eframe::App for CardBuilderApp {
         self.fix_selection();
         self.poll_exports(now);
         self.apply_theme(&ctx);
+        self.sync_design_fonts(&ctx);
         // background rendering: the editor's card image and the 3D textures
         self.render.sync(&self.doc, self.current_record());
         if let Some(tex) = self.render.take_textures() {

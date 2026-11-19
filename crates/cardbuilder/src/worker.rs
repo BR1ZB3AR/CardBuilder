@@ -6,13 +6,10 @@ use cb_core::doc::{Doc, Side};
 use cb_print::{render_finish_mask, render_side, DrawOptions, ImageCache};
 use std::sync::{Arc, Condvar, Mutex};
 
-/// the editor's image of one side (premultiplied RGBA of the bleed box)
+/// the editor's images of both sides (premultiplied RGBA of each bleed box)
 pub struct Preview {
-    pub side: Side,
-    pub ppm: f64,
-    pub w: u32,
-    pub h: u32,
-    pub rgba: Vec<u8>,
+    /// front, back: (width, height, pixels)
+    pub sides: [(u32, u32, Vec<u8>); 2],
 }
 
 /// one side of the 3D card: straight RGBA of the trim box (with its mip levels), and its finish mask
@@ -66,7 +63,7 @@ fn submit<J, D>(slot: &Slot<J, D>, job: J) {
     slot.wake.notify_one();
 }
 
-type PreviewJob = (Arc<Doc>, Side, Option<usize>, f64);
+type PreviewJob = (Arc<Doc>, Option<usize>, f64);
 type TexJob = (Arc<Doc>, Option<usize>);
 
 pub struct Renderer {
@@ -74,7 +71,7 @@ pub struct Renderer {
     textures: Arc<Slot<TexJob, Textures>>,
     /// the design the jobs were made from (shared, so a frame without changes costs one compare)
     doc: Option<Arc<Doc>>,
-    preview_key: Option<(Side, Option<usize>, u64)>,
+    preview_key: Option<(Option<usize>, u64)>,
     tex_key: Option<Option<usize>>,
     tex_doc: Option<Arc<Doc>>,
 }
@@ -92,10 +89,13 @@ fn tex_ppm(doc: &Doc) -> f64 {
 
 impl Renderer {
     pub fn new(ctx: &egui::Context) -> Renderer {
-        let preview = spawn("card-preview", ctx.clone(), |(doc, side, record, ppm): PreviewJob, imgs| {
+        let preview = spawn("card-preview", ctx.clone(), |(doc, record, ppm): PreviewJob, imgs| {
             prepare(imgs, &doc);
-            let pm = render_side(&doc, side, &DrawOptions::preview(record), ppm, true, imgs)?;
-            Some(Preview { side, ppm, w: pm.width(), h: pm.height(), rgba: pm.take() })
+            let side = |s: Side| -> Option<(u32, u32, Vec<u8>)> {
+                let pm = render_side(&doc, s, &DrawOptions::preview(record), ppm, true, imgs)?;
+                Some((pm.width(), pm.height(), pm.take()))
+            };
+            Some(Preview { sides: [side(Side::Front)?, side(Side::Back)?] })
         });
         let textures = spawn("card-3d-textures", ctx.clone(), |(doc, record): TexJob, imgs| {
             prepare(imgs, &doc);
@@ -129,13 +129,13 @@ impl Renderer {
         }
     }
 
-    /// ask for the editor image of `side` at `ppm` pixels per mm (only when something changed)
-    pub fn want_preview(&mut self, side: Side, record: Option<usize>, ppm: f64) {
+    /// ask for the editor images of both sides at `ppm` pixels per mm (only when something changed)
+    pub fn want_preview(&mut self, record: Option<usize>, ppm: f64) {
         let Some(d) = self.doc.clone() else { return };
-        let key = (side, record, Arc::as_ptr(&d) as u64 ^ (ppm.to_bits().rotate_left(17)));
+        let key = (record, Arc::as_ptr(&d) as u64 ^ (ppm.to_bits().rotate_left(17)));
         if self.preview_key != Some(key) {
             self.preview_key = Some(key);
-            submit(&self.preview, (d, side, record, ppm));
+            submit(&self.preview, (d, record, ppm));
         }
     }
 

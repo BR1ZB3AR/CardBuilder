@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "cardbuilder"
-version = "0.0.2"
+version = "0.0.11"
 dependencies = [
  "base64",
  "bytemuck",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "cb-core"
-version = "0.0.2"
+version = "0.0.11"
 dependencies = [
  "serde",
  "serde_json",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "cb-print"
-version = "0.0.2"
+version = "0.0.11"
 dependencies = [
  "base64",
  "cb-core",

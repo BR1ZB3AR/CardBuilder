@@ -33,9 +33,9 @@ fn click(h: &mut Harness<'_, CardBuilderApp>, at: Pos2) {
     drag(h, at, at, Modifiers::NONE);
 }
 
-/// the default business card's name, selected by clicking it on the card
+/// the default business card's company name (its bold word), selected by clicking it on the card
 fn select_name(h: &mut Harness<'_, CardBuilderApp>) -> cb_core::Layer {
-    let l = h.state().doc_for_tests().layers.iter().find(|l| l.text.as_deref() == Some("Alex Morgan")).unwrap().clone();
+    let l = h.state().doc_for_tests().layers.iter().find(|l| l.side == cb_core::Side::Front && l.text.as_deref() == Some("COMPANY")).unwrap().clone();
     let p = h.state().card_point_for_tests(l.x, l.y);
     click(h, p);
     let sel = h.state().selected_for_tests().cloned().expect("clicking the name selects it");
@@ -160,4 +160,208 @@ fn batch_rows_fill_the_card() {
     h.get_by_label("Next row ( ] )").click();
     h.run_steps(2);
     assert!(h.get_all_by_label_contains("2 / 5").next().is_some());
+}
+
+#[test]
+fn browsing_formats_and_coming_back_keeps_the_layout() {
+    let mut h = app();
+    let before = h.state().doc_for_tests().layers.clone();
+    h.get_by_label("Card format").click();
+    h.run_steps(3);
+    h.get_by_label("Playing & game cards").click();
+    h.run_steps(2);
+    h.get_by_label("Poker").click();
+    h.run_steps(2);
+    h.get_by_label("Business cards").click();
+    h.run_steps(2);
+    h.get_by_label("Europe").click();
+    h.run_steps(3);
+    let after = &h.state().doc_for_tests().layers;
+    assert_eq!(after.len(), before.len());
+    for (a, b) in before.iter().zip(after) {
+        assert!((a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9 && (a.w - b.w).abs() < 1e-9 && a.size == b.size, "{} changed: {:?} → {:?}", a.name, (a.x, a.y, a.w, a.size), (b.x, b.y, b.w, b.size));
+    }
+}
+
+#[test]
+fn both_sides_are_on_the_canvas() {
+    let mut h = app();
+    // the back's job title can be clicked without switching sides first
+    let q = h.state().doc_for_tests().layers.iter().find(|l| l.text.as_deref() == Some("Creative Designer")).unwrap().clone();
+    assert_eq!(q.side, cb_core::Side::Back);
+    h.state_mut().set_side_for_tests(true);
+    let p = h.state().card_point_for_tests(q.x, q.y);
+    h.state_mut().set_side_for_tests(false);
+    click(&mut h, p);
+    assert_eq!(h.state().selected_for_tests().map(|l| l.id.clone()), Some(q.id.clone()), "clicking the back's title selects it");
+    // and the sidebar now edits the back
+    assert!(h.get_all_by_label_contains("Layers · Back").next().is_some());
+}
+
+#[test]
+fn local_templates_show_in_their_group_and_start_a_card() {
+    // a template folder of our own, with one template in the Ingress Biocard group
+    let dir = std::env::temp_dir().join(format!("cb-templates-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-tcg").unwrap()));
+    doc.layers[0].text = Some("FROM THE TEMPLATE".into());
+    let info = cb_core::doc::TemplateInfo { id: "test-origin".into(), name: "Test Origin".into(), category: "game".into(), group: Some("Ingress Biocard".into()), note: "63 × 88 mm".into() };
+    std::fs::write(dir.join("t.cb"), cb_core::doc::save_cb_template(&doc, "test", &info)).unwrap();
+    // SAFETY: only this test reads the variable while it runs (others never open the picker's templates)
+    unsafe { std::env::set_var("CB_TEMPLATE_DIR", &dir) };
+
+    let mut h = app();
+    h.get_by_label("Card format").click();
+    h.run_steps(3);
+    h.get_by_label("Playing & game cards").click();
+    h.run_steps(2);
+    // the group is closed until opened
+    assert!(h.query_by_label("Test Origin").is_none());
+    h.get_by_label("Ingress Biocard").click();
+    h.run_steps(6); // the pop-up grows: egui settles its new size over a few frames
+    assert!(h.query_by_label("Enlightened").is_some() && h.query_by_label("Resistance").is_some());
+    h.get_by_label("Test Origin").click();
+    h.run_steps(3);
+    let d = h.state().doc_for_tests();
+    assert_eq!(d.template.as_deref(), Some("test-origin"));
+    assert_eq!(d.layers[0].text.as_deref(), Some("FROM THE TEMPLATE"));
+    assert!(!h.state().has_unsaved_changes(), "a fresh card from a template has nothing to save yet");
+    assert!(!h.state().top_bar_density().is_empty());
+    // New starts again from the template
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::N);
+    h.run_steps(3);
+    assert_eq!(h.state().doc_for_tests().template.as_deref(), Some("test-origin"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn faction_buttons_switch_logos_and_colour() {
+    // a biocard-like design with a Faction choice: one logo layer per option, the name recoloured
+    let mut doc = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-poker").unwrap()));
+    doc.layers.clear();
+    for (id, on) in [("res", true), ("enl", false), ("xfac", false)] {
+        let mut l = cb_core::Layer::new(id, cb_core::doc::LayerType::Shape, cb_core::Side::Back, 30.0, 40.0, 20.0, 20.0);
+        l.id = id.into();
+        l.visible = on;
+        doc.layers.push(l);
+    }
+    let mut name = cb_core::Layer::new("Agent name", cb_core::doc::LayerType::Text, cb_core::Side::Back, 30.0, 10.0, 40.0, 8.0);
+    name.id = "name".into();
+    name.color = Some("#0097ca".into());
+    doc.layers.push(name);
+    let opt = |n: &str, c: &str, id: &str| cb_core::doc::VariantOption { name: n.into(), color: c.into(), show: vec![id.into()], recolor: vec![("name".into(), c.into())] };
+    doc.variants = Some(cb_core::doc::Variants {
+        label: "Faction".into(),
+        hint: None,
+        options: vec![opt("RES", "#0097ca", "res"), opt("ENL", "#23c316", "enl"), opt("XFAC", "#e0262b", "xfac")],
+        active: Some(0),
+    });
+    let mut h = app();
+    h.state_mut().open_json("bio.cb", &cb_core::doc::save_cb(&doc, "test"));
+    h.run_steps(4);
+    let shown = |h: &Harness<'_, CardBuilderApp>| {
+        h.state().doc_for_tests().layers.iter().filter(|l| l.visible && l.id != "name").map(|l| l.id.clone()).collect::<Vec<_>>()
+    };
+    let colour = |h: &Harness<'_, CardBuilderApp>| h.state().doc_for_tests().layers.iter().find(|l| l.id == "name").unwrap().color.clone().unwrap();
+    assert_eq!(shown(&h), ["res"]);
+    h.get_by_label("ENL").click();
+    h.run_steps(3);
+    assert_eq!(shown(&h), ["enl"]);
+    assert_eq!(colour(&h), "#23c316");
+    h.get_by_label("XFAC").click();
+    h.run_steps(3);
+    assert_eq!(shown(&h), ["xfac"]);
+    assert_eq!(colour(&h), "#e0262b");
+    // one undo step per press
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert_eq!(shown(&h), ["enl"]);
+}
+
+#[test]
+fn leaving_a_card_with_a_look_of_its_own_starts_a_fresh_card() {
+    // the built-in Enlightened biocard has its own design; picking a business card starts afresh
+    let bio = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-biocard-enl").unwrap()));
+    let mut h = app();
+    h.state_mut().open_json("bio.cb", &cb_core::doc::save_cb(&bio, "test"));
+    h.run_steps(4);
+    h.get_by_label("Card format").click();
+    h.run_steps(3);
+    h.get_by_label("Business cards").click();
+    h.run_steps(2);
+    h.get_by_label("Europe").click();
+    h.run_steps(4);
+    let d = h.state().doc_for_tests();
+    assert_eq!(d.format.category(), cb_core::format::Category::Business);
+    let texts: Vec<&str> = d.layers.iter().filter_map(|l| l.text.as_deref()).collect();
+    assert!(texts.contains(&"COMPANY") && texts.contains(&"Creative Designer"), "the business card's own design: {texts:?}");
+    assert!(d.layers.len() < bio.layers.len() + 20 && !d.layers.iter().any(|l| bio.layers.iter().any(|b| b.id == l.id)), "nothing of the biocard is left");
+    assert!(d.variants.is_none() && d.template.is_none());
+    assert!(!h.state().has_unsaved_changes(), "a fresh card has nothing to save yet");
+    // Ctrl+Z brings the biocard back
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert_eq!(h.state().doc_for_tests().format.preset, "game-biocard-enl");
+}
+
+#[test]
+fn leaving_an_edited_card_asks_to_save_first() {
+    let bio = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-biocard-enl").unwrap()));
+    let mut h = app();
+    h.state_mut().open_json("bio.cb", &cb_core::doc::save_cb(&bio, "test"));
+    h.run_steps(4);
+    // an edit: move the first layer with the keyboard
+    let l = select_name_like(&mut h);
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(2);
+    assert!(h.state().has_unsaved_changes(), "edited {}", l.name);
+    h.get_by_label("Card format").click();
+    h.run_steps(3);
+    h.get_by_label("Business cards").click();
+    h.run_steps(2);
+    h.get_by_label("Europe").click();
+    h.run_steps(4);
+    assert!(h.query_by_label("Don't save").is_some(), "Save changes? is asked");
+    assert_eq!(h.state().doc_for_tests().format.preset, "game-biocard-enl", "nothing changes before the answer");
+    h.get_by_label("Don't save").click();
+    h.run_steps(4);
+    assert_eq!(h.state().doc_for_tests().format.category(), cb_core::format::Category::Business);
+}
+
+/// any text layer on the front, selected by clicking it
+fn select_name_like(h: &mut Harness<'_, CardBuilderApp>) -> cb_core::Layer {
+    let l = h.state().doc_for_tests().layers.iter().find(|l| l.side == cb_core::Side::Front && l.kind == cb_core::LayerType::Text).unwrap().clone();
+    let p = h.state().card_point_for_tests(l.x, l.y);
+    click(h, p);
+    h.state().selected_for_tests().cloned().expect("clicking a text selects it")
+}
+
+#[test]
+fn an_outlined_number_can_be_edited_and_deleted() {
+    // a biocard-like number: outline only, no fill
+    let mut doc = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-poker").unwrap()));
+    doc.layers.clear();
+    let mut num = cb_core::Layer::text(cb_core::Side::Front, 31.75, 60.0, 30.0, "1", "Exo", 900.0, 120.0, "#ffffff00", cb_core::doc::Align::Center);
+    num.stroke = Some("#ffffff".into());
+    num.stroke_w = Some(0.25);
+    let id = num.id.clone();
+    doc.layers.push(num.clone());
+    let mut h = app();
+    h.state_mut().open_json("bio.cb", &cb_core::doc::save_cb(&doc, "test"));
+    h.run_steps(4);
+    let p = h.state().card_point_for_tests(num.x, num.y);
+    click(&mut h, p);
+    assert_eq!(h.state().selected_for_tests().map(|l| l.id.clone()), Some(id.clone()), "clicking the number selects it");
+    // its outline shows in the sidebar, and turning the fill on keeps the outline
+    assert!(h.query_by_label("Outline width").is_some() || h.query_by_label_contains("Outline width").is_some());
+    h.get_by_label("Fill").click();
+    h.run_steps(3);
+    let l = h.state().doc_for_tests().layer(&id).unwrap().clone();
+    assert_eq!(l.color.as_deref(), Some("#ffffff"), "filled");
+    assert_eq!(l.stroke_w, Some(0.25));
+    // Delete removes it
+    click(&mut h, p);
+    h.key_press(egui::Key::Delete);
+    h.run_steps(3);
+    assert!(h.state().doc_for_tests().layer(&id).is_none(), "deleted");
 }

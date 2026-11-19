@@ -45,6 +45,15 @@ pub enum Align {
     Right,
 }
 
+/// where text sits in a text frame (a text box with a fixed height)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VAlign {
+    Top,
+    Middle,
+    Bottom,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ShapeKind {
@@ -264,6 +273,10 @@ pub struct Layer {
     pub wrap: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uppercase: Option<bool>,
+    /// a text frame: the box keeps its height (`h`) and the text sits at its top / middle /
+    /// bottom; None = the box follows the text, centred on (x, y)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valign: Option<VAlign>,
     // image
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
@@ -317,6 +330,7 @@ impl Layer {
             letter_spacing: None,
             wrap: None,
             uppercase: None,
+            valign: None,
             src: None,
             shape: None,
             fill: None,
@@ -487,11 +501,13 @@ pub struct SceneSettings {
     /// how far a folded card is opened, degrees (0 closed … 180 flat)
     pub open: f64,
     pub auto_rotate: bool,
+    /// flat cards: show two cards side by side, the second turned to show its back
+    pub pair: bool,
 }
 
 impl Default for SceneSettings {
     fn default() -> Self {
-        SceneSettings { backdrop: Backdrop::Studio, bg_color: "#c9cbe0".into(), light: 1.0, light_angle: -35.0, shadows: true, open: 110.0, auto_rotate: false }
+        SceneSettings { backdrop: Backdrop::Studio, bg_color: "#c9cbe0".into(), light: 1.0, light_angle: -35.0, shadows: true, open: 110.0, auto_rotate: false, pair: true }
     }
 }
 
@@ -563,9 +579,89 @@ pub struct Doc {
     pub data: DataSet,
     #[serde(default)]
     pub print: PrintSettings,
+    /// fonts the design brings along (beyond the bundled ones), so it opens anywhere
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fonts: Vec<FontFile>,
+    /// the local template this design was started from (its id)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    /// a choice the design offers as buttons (e.g. a biocard's faction), if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants: Option<Variants>,
+}
+
+/// One choice a design (usually a template) offers as a row of buttons, such as a biocard's
+/// faction: each option shows its own layers (the other options' layers are hidden) and sets
+/// colours.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Variants {
+    /// what is being chosen ("Faction")
+    pub label: String,
+    /// a line under the heading, saying what the buttons change
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    pub options: Vec<VariantOption>,
+    /// the option picked
+    #[serde(default)]
+    pub active: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariantOption {
+    /// the button's text ("RES")
+    pub name: String,
+    /// the button's colour
+    pub color: String,
+    /// layers (ids) shown with this option only
+    #[serde(default)]
+    pub show: Vec<String>,
+    /// (layer id, colour) set when this option is picked
+    #[serde(default)]
+    pub recolor: Vec<(String, String)>,
+}
+
+/// a font file carried in a design
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontFile {
+    /// the name layers use for it
+    pub family: String,
+    /// the font file as a data URL
+    pub src: String,
 }
 
 impl Doc {
+    /// Pick option `i` of the design's choice: its layers show, the other options' layers
+    /// hide, and its colours are set.
+    pub fn apply_variant(&mut self, i: usize) {
+        let Some(v) = self.variants.as_mut() else { return };
+        if i >= v.options.len() {
+            return;
+        }
+        v.active = Some(i);
+        let v = v.clone();
+        for (j, o) in v.options.iter().enumerate() {
+            for id in &o.show {
+                if let Some(l) = self.layers.iter_mut().find(|l| &l.id == id) {
+                    l.visible = j == i;
+                }
+            }
+        }
+        // a layer two options share stays shown when the picked one has it
+        for id in &v.options[i].show {
+            if let Some(l) = self.layers.iter_mut().find(|l| &l.id == id) {
+                l.visible = true;
+            }
+        }
+        for (id, c) in &v.options[i].recolor {
+            if let Some(l) = self.layers.iter_mut().find(|l| &l.id == id) {
+                l.color = Some(c.clone());
+            }
+        }
+    }
+
     pub fn background(&self, side: Side) -> &Background {
         match side {
             Side::Front => &self.front,
@@ -647,6 +743,9 @@ pub fn default_doc(format: CardFormat) -> Doc {
         scene: SceneSettings::default(),
         data: DataSet::default(),
         print: PrintSettings::default(),
+        fonts: vec![],
+        template: None,
+        variants: None,
         format,
     };
     let f = doc.format.clone();
@@ -722,6 +821,7 @@ pub fn default_doc(format: CardFormat) -> Doc {
             emblem.name = "Emblem".into();
             doc.layers.push(emblem);
         }
+        Category::Business => business_card(&mut doc),
         _ => {
             // business-card style: name, title and an accent bar on the front; contact details and a QR code on the back
             doc.front = Background { mode: BgMode::Solid, color: "#1f2347".into(), ..Default::default() };
@@ -767,6 +867,142 @@ fn encode_uri_component(s: &str) -> String {
 /// an SVG as a data URL (how pictures live in a design)
 pub fn svg_data_url(svg: &str) -> String {
     format!("data:image/svg+xml;charset=utf-8,{}", encode_uri_component(svg))
+}
+
+/// The business card starter: white, the company name in two weights in the middle and a
+/// teal-to-blue wave along the bottom with the website; on the back the company name again, a
+/// soft divider, the person's name, title and contact rows with icons.
+fn business_card(doc: &mut Doc) {
+    let f = doc.format.clone();
+    let p = f.front_panel();
+    let (ox, oy, w, h) = (p.x, p.y, p.w, p.h);
+    // sizes follow the card, against an 85 × 55 mm one
+    let k = (w / 85.0).min(h / 55.0);
+    let blue = "#2b87d1";
+    let teal = "#1fa7b8";
+    let dark = "#3b3f45";
+    let ink = "#33475b";
+    let icon_c = "#25507a";
+    doc.front = Background { mode: BgMode::Solid, color: "#ffffff".into(), ..Default::default() };
+    doc.back = doc.front.clone();
+    // Inter: how far a line's baseline sits below its middle, and word widths (em)
+    const M2B: f64 = 0.3638;
+    const COMPANY_W: f64 = 5.3296; // bold
+    const NAME_W: f64 = 2.9478;
+    const SPACE_W: f64 = 0.2812;
+    const JOHN_W: f64 = 2.8643; // bold
+    let em = |pt: f64| pt * crate::MM_PER_PT;
+    let middle = |pt: f64, base: f64| base - M2B * em(pt);
+    // two words in two weights meeting at `join`: the first ends there, the second starts a space on
+    #[allow(clippy::too_many_arguments)]
+    let pair = |side: Side, a: &str, b: &str, pt: f64, join: f64, base: f64, room: (f64, f64), color: &str| {
+        let y = middle(pt, base);
+        let first = Layer::text(side, join - room.0 / 2.0, y, room.0, a, "Inter", 800.0, pt, color, Align::Right);
+        let start = join + SPACE_W * em(pt);
+        let second = Layer::text(side, start + room.1 / 2.0, y, room.1, b, "Inter", 400.0, pt, color, Align::Left);
+        [first, second]
+    };
+    let band = 0.12 * h;
+    let wave = |side: Side| {
+        let bl = f.bleed;
+        let top = h - band;
+        let (x0, y0, x1, y1) = (-bl, top - 0.5, w + bl, h + bl);
+        let (lw, lh) = (x1 - x0, y1 - y0);
+        let pt = |x: f64, y: f64| format!("{:.3} {:.3}", x - x0, y - y0);
+        let d = format!(
+            "M{} L{} L{} C{} {} {} L{} C{} {} {} L{} L{} Z",
+            pt(-bl, h + bl),
+            pt(-bl, h),
+            pt(0.0, h),
+            pt(0.13 * w, h),
+            pt(0.12 * w, top),
+            pt(0.27 * w, top),
+            pt(0.80 * w, top),
+            pt(0.91 * w, top),
+            pt(0.97 * w, top + 0.12 * band),
+            pt(w, top + 0.42 * band),
+            pt(w + bl, top + 0.5 * band),
+            pt(w + bl, h + bl),
+        );
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {lw:.3} {lh:.3}" width="{lw:.3}mm" height="{lh:.3}mm"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#16b39b"/><stop offset="1" stop-color="#2a7fd6"/></linearGradient></defs><path d="{d}" fill="url(#g)"/></svg>"##
+        );
+        let mut l = Layer::new("Wave", LayerType::Image, side, ox + x0 + lw / 2.0, oy + y0 + lh / 2.0, lw, lh);
+        l.src = Some(svg_data_url(&svg));
+        l
+    };
+    let website = |side: Side| {
+        let pt = 6.0 * k;
+        // lower-case letters' middle (x-height / 2) in the middle of the wave
+        let base = oy + h - 0.47 * band + 0.273 * em(pt);
+        Layer::text(side, ox + w / 2.0, middle(pt, base), w * 0.6, "www.website.com", "Inter", 500.0, pt, "#ffffff", Align::Center)
+    };
+
+    // ---- front
+    doc.layers.push(wave(Side::Front));
+    let pt = 10.5 * k;
+    let total = (COMPANY_W + SPACE_W + NAME_W) * em(pt);
+    let join = ox + w / 2.0 - total / 2.0 + COMPANY_W * em(pt);
+    let base = oy + h * 0.45 + 0.3638 * em(pt); // capitals' middle at 45 % of the height
+    let room = (join - ox - 3.0 * k, ox + w - 3.0 * k - join - SPACE_W * em(pt));
+    doc.layers.extend(pair(Side::Front, "COMPANY", "NAME", pt, join, base, room, blue));
+    doc.layers.push(website(Side::Front));
+
+    // ---- back
+    doc.layers.push(wave(Side::Back));
+    let line_x = ox + 0.505 * w;
+    // as on the front, made smaller when the left column is narrower than that
+    let pt = pt.min((line_x - ox - 5.0 * k) / ((COMPANY_W + SPACE_W + NAME_W) * crate::MM_PER_PT));
+    let total = (COMPANY_W + SPACE_W + NAME_W) * em(pt);
+    let join = ox + (line_x - ox) / 2.0 - total / 2.0 + COMPANY_W * em(pt);
+    let base = oy + h * 0.48 + 0.3638 * em(pt);
+    let room = (join - ox - 2.0 * k, line_x - 1.5 * k - join - SPACE_W * em(pt));
+    doc.layers.extend(pair(Side::Back, "COMPANY", "NAME", pt, join, base, room, blue));
+    // a soft divider: a thin line with a shadow to its left, fading out at both ends
+    let (dw, dh) = (3.5 * k, 0.71 * h);
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {dw:.3} {dh:.3}" width="{dw:.3}mm" height="{dh:.3}mm"><defs><linearGradient id="s" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.12"/></linearGradient><linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.25" stop-color="#fff"/><stop offset="0.75" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient><mask id="m"><rect width="{dw:.3}" height="{dh:.3}" fill="url(#v)"/></mask></defs><g mask="url(#m)"><rect width="{dw:.3}" height="{dh:.3}" fill="url(#s)"/><rect x="{lx:.3}" width="0.18" height="{dh:.3}" fill="#cfd5dc"/></g></svg>"##,
+        lx = dw - 0.18
+    );
+    let mut divider = Layer::new("Divider", LayerType::Image, Side::Back, line_x - dw / 2.0, oy + 0.09 * h + dh / 2.0, dw, dh);
+    divider.src = Some(svg_data_url(&svg));
+    doc.layers.push(divider);
+    // the person
+    let x0 = ox + 0.572 * w;
+    let xr = ox + w - 4.0 * k;
+    const DOE_W: f64 = 2.0874;
+    let pt = (11.0 * k).min((xr - x0) / ((JOHN_W + SPACE_W + DOE_W) * crate::MM_PER_PT) * 0.98);
+    let y = middle(pt, oy + 0.24 * h);
+    doc.layers.push(Layer::text(Side::Back, (x0 + xr) / 2.0, y, xr - x0, "JOHN", "Inter", 800.0, pt, dark, Align::Left));
+    let start = x0 + (JOHN_W + SPACE_W) * em(pt);
+    doc.layers.push(Layer::text(Side::Back, (start + xr) / 2.0, y, xr - start, "DOE", "Inter", 400.0, pt, dark, Align::Left));
+    let pt = 7.5 * k;
+    doc.layers.push(Layer::text(Side::Back, (x0 + xr) / 2.0, middle(pt, oy + 0.335 * h), xr - x0, "Creative Designer", "Inter", 400.0, pt, teal, Align::Left));
+    // contact rows: an icon, then the text
+    let icons = [
+        ("Address icon", format!(r##"<path d="M12 2.5c-3.9 0-7 3-7 6.9 0 5 7 12.1 7 12.1s7-7.1 7-12.1c0-3.9-3.1-6.9-7-6.9z" fill="{icon_c}"/><circle cx="12" cy="9.4" r="2.6" fill="#fff"/>"##)),
+        ("Phone icon", format!(r##"<rect x="7" y="2.5" width="10" height="19" rx="2.2" fill="{icon_c}"/><rect x="8.6" y="5" width="6.8" height="12.4" rx="0.6" fill="#fff"/><circle cx="12" cy="19.3" r="0.95" fill="#fff"/>"##)),
+        ("Website icon", format!(r##"<circle cx="12" cy="12" r="9.2" fill="{icon_c}"/><g fill="none" stroke="#fff" stroke-width="1.3"><ellipse cx="12" cy="12" rx="3.9" ry="9.2"/><path d="M2.8 12h18.4M4.4 7.4h15.2M4.4 16.6h15.2"/></g>"##)),
+        ("Email icon", format!(r##"<rect x="2.5" y="5.5" width="19" height="13" rx="1.8" fill="{icon_c}"/><path d="M3.6 7.2l8.4 6.4 8.4-6.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>"##)),
+    ];
+    let rows = [("123 Anywhere Street, Any City, ST 12345", 0.44), ("+123 456 7890", 0.532), ("www.website.com", 0.615), ("hello@website.com", 0.693)];
+    let pt = 5.6 * k;
+    let tx = x0 + 4.5 * k;
+    let s = 2.6 * k;
+    for ((name, art), (text, at)) in icons.into_iter().zip(rows) {
+        let y = oy + at * h;
+        let mut icon = Layer::new(name, LayerType::Image, Side::Back, x0 + 1.3 * k, y, s, s);
+        icon.src = Some(svg_data_url(&format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48">{art}</svg>"##)));
+        doc.layers.push(icon);
+        let mut t = Layer::text(Side::Back, (tx + xr) / 2.0, y, xr - tx, text, "Inter", 400.0, pt, ink, Align::Left);
+        if text.len() > 30 {
+            t.wrap = Some(true);
+            t.line_height = Some(1.25);
+            t.h = 2.0 * 1.25 * em(pt);
+        }
+        doc.layers.push(t);
+    }
+    doc.layers.push(website(Side::Back));
 }
 
 /// the two Ingress factions, for the agent biocard templates
@@ -936,6 +1172,43 @@ pub fn save_cb(doc: &Doc, app: &str) -> String {
     serde_json::to_string_pretty(&v).expect("documents always serialise")
 }
 
+/// What a template file says about itself: where it shows in the card picker.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateInfo {
+    pub id: String,
+    pub name: String,
+    /// `format::Category::id`
+    pub category: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// a `.cb` file that is also a template (it shows in the card picker)
+pub fn save_cb_template(doc: &Doc, app: &str, info: &TemplateInfo) -> String {
+    let mut d = doc.clone();
+    d.template = Some(info.id.clone());
+    let v = serde_json::json!({
+        "format": CB_FORMAT,
+        "formatVersion": 1,
+        "app": app,
+        "template": info,
+        "design": d,
+    });
+    serde_json::to_string_pretty(&v).expect("documents always serialise")
+}
+
+/// the template header of a `.cb` file, if it is a template
+pub fn template_info(text: &str) -> Option<TemplateInfo> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    if v.get("format").and_then(|f| f.as_str()) != Some(CB_FORMAT) {
+        return None;
+    }
+    serde_json::from_value(v.get("template")?.clone()).ok()
+}
+
 /// the bare design JSON (autosave)
 pub fn save_doc(doc: &Doc) -> String {
     serde_json::to_string(doc).expect("documents always serialise")
@@ -1069,6 +1342,36 @@ mod tests {
     use crate::format::{preset, PRESETS};
 
     #[test]
+    fn variants_show_their_layers_and_set_colours() {
+        let mut doc = default_doc(CardFormat::from_preset(preset("game-poker").unwrap()));
+        let mut logo = |id: &str| {
+            let mut l = Layer::new(id, LayerType::Image, Side::Back, 10.0, 10.0, 5.0, 5.0);
+            l.id = id.into();
+            doc.layers.push(l);
+        };
+        logo("res"); logo("enl"); logo("xfac");
+        let mut name = Layer::new("Agent name", LayerType::Text, Side::Back, 10.0, 10.0, 5.0, 5.0);
+        name.id = "name".into();
+        doc.layers.push(name);
+        let opt = |n: &str, c: &str, show: &[&str]| VariantOption { name: n.into(), color: c.into(), show: show.iter().map(|s| s.to_string()).collect(), recolor: vec![("name".into(), c.into())] };
+        doc.variants = Some(Variants { label: "Faction".into(), hint: None, options: vec![opt("RES", "#0097ca", &["res"]), opt("ENL", "#23c316", &["enl"]), opt("XFAC", "#e0262b", &["xfac"])], active: None });
+        let shown = |d: &Doc| d.layers.iter().filter(|l| ["res", "enl", "xfac"].contains(&l.id.as_str()) && l.visible).map(|l| l.id.clone()).collect::<Vec<_>>();
+        let colour = |d: &Doc| d.layers.iter().find(|l| l.id == "name").unwrap().color.clone();
+        doc.apply_variant(1);
+        assert_eq!(shown(&doc), ["enl"]);
+        assert_eq!(colour(&doc).as_deref(), Some("#23c316"));
+        doc.apply_variant(2);
+        assert_eq!(shown(&doc), ["xfac"]);
+        assert_eq!(doc.variants.as_ref().unwrap().active, Some(2));
+        // saved and opened again, the choice is kept
+        let back = load_design(&save_cb(&doc, "test")).unwrap();
+        assert_eq!(back.variants, doc.variants);
+        // a design without a choice saves as before
+        let plain = default_doc(CardFormat::from_preset(preset("game-poker").unwrap()));
+        assert!(!save_cb(&plain, "test").contains("variants"));
+    }
+
+    #[test]
     fn every_preset_gets_a_design_inside_its_sheet() {
         for p in PRESETS {
             let d = default_doc(CardFormat::from_preset(p));
@@ -1092,6 +1395,17 @@ mod tests {
             assert!(d.layers.iter().any(|l| l.stroke.as_deref() == Some(colour)), "{id}: faction colour");
             assert!(d.layers_on(Side::Back).count() >= 4, "{id}: the back has the faction ring");
         }
+    }
+
+    #[test]
+    fn templates_say_where_they_belong() {
+        let d = default_doc(CardFormat::from_preset(preset("game-tcg").unwrap()));
+        let info = TemplateInfo { id: "t1".into(), name: "Mine".into(), category: "game".into(), group: Some("Ingress Biocard".into()), note: "63 × 88".into() };
+        let text = save_cb_template(&d, "test", &info);
+        assert_eq!(template_info(&text), Some(info));
+        let back = load_design(&text).unwrap();
+        assert_eq!(back.template.as_deref(), Some("t1"));
+        assert_eq!(template_info(&save_cb(&d, "test")), None);
     }
 
     #[test]

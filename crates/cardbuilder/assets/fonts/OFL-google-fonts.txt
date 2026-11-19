@@ -1,4 +1,4 @@
-The fonts Anton, Bangers, Bebas Neue, Cormorant Garamond, Dancing Script, Great Vibes, Lora,
+The fonts Anton, Bangers, Bebas Neue, Coda, Cormorant Garamond, Dancing Script, Exo, Great Vibes, Lora,
 Montserrat, Oswald, Pacifico, Permanent Marker, Playfair Display, Space Grotesk and Space Mono are
 from Google Fonts (https://github.com/google/fonts, ofl/ folder). Each is Copyright its respective
 authors (see the font files metadata) and licensed under the SIL Open Font License, Version 1.1:

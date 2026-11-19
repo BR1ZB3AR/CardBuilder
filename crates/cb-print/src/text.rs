@@ -37,6 +37,9 @@ const ANTON: &[u8] = font!("Anton-Regular.ttf");
 const BANGERS: &[u8] = font!("Bangers-Regular.ttf");
 const PERMANENT_MARKER: &[u8] = font!("PermanentMarker-Regular.ttf");
 const SPACE_MONO: &[u8] = font!("SpaceMono-Regular.ttf");
+const CODA: &[u8] = font!("Coda-Regular.ttf");
+const CODA_EXTRABOLD: &[u8] = font!("Coda-ExtraBold.ttf");
+const EXO: &[u8] = font!("Exo-Variable.ttf");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FontKind {
@@ -60,11 +63,13 @@ impl FontKind {
 }
 
 /// the fonts offered in the editor, by kind
-pub const FONTS: [(&str, FontKind); 15] = [
+pub const FONTS: [(&str, FontKind); 17] = [
     ("Inter", FontKind::Sans),
     ("Montserrat", FontKind::Sans),
     ("Space Grotesk", FontKind::Sans),
     ("Oswald", FontKind::Sans),
+    ("Coda", FontKind::Sans),
+    ("Exo", FontKind::Sans),
     ("Playfair Display", FontKind::Serif),
     ("Lora", FontKind::Serif),
     ("Cormorant Garamond", FontKind::Serif),
@@ -78,8 +83,64 @@ pub const FONTS: [(&str, FontKind); 15] = [
     ("Space Mono", FontKind::Mono),
 ];
 
+/// fonts brought in by designs: family → (fingerprint of the file, its bytes)
+type FontRegistry = std::sync::RwLock<std::collections::HashMap<String, (u64, &'static [u8])>>;
+
+fn custom_fonts() -> &'static FontRegistry {
+    static F: std::sync::OnceLock<FontRegistry> = std::sync::OnceLock::new();
+    F.get_or_init(Default::default)
+}
+
+fn fingerprint(src: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    src.len().hash(&mut h);
+    src.get(..src.len().min(256)).hash(&mut h);
+    src.get(src.len().saturating_sub(256)..).hash(&mut h);
+    h.finish()
+}
+
+/// Make the fonts a design carries available for drawing. Cheap when nothing is new (call it
+/// before every render); each font file is decoded once and kept for the life of the program.
+pub fn register_fonts(fonts: &[cb_core::doc::FontFile]) {
+    for f in fonts {
+        let fp = fingerprint(&f.src);
+        if custom_fonts().read().unwrap().get(&f.family).is_some_and(|(k, _)| *k == fp) {
+            continue;
+        }
+        let Ok((_, bytes)) = crate::images::data_url_bytes(&f.src) else { continue };
+        if Face::from_slice(&bytes, 0).is_none() {
+            continue;
+        }
+        let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+        custom_fonts().write().unwrap().insert(f.family.clone(), (fp, leaked));
+    }
+}
+
+/// a design font's file, once registered
+pub fn custom_font(family: &str) -> Option<&'static [u8]> {
+    custom_fonts().read().unwrap().get(family).map(|(_, b)| *b)
+}
+
+/// one of the fonts that come with CardBuilder
+pub fn is_bundled(family: &str) -> bool {
+    FONTS.iter().any(|(f, _)| *f == family)
+}
+
+/// the family name inside a font file (its typographic family, else its family)
+pub fn family_name(bytes: &[u8]) -> Option<String> {
+    let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+    let name = |id: u16| face.names().into_iter().filter(|n| n.name_id == id && n.is_unicode()).find_map(|n| n.to_string());
+    name(ttf_parser::name_id::TYPOGRAPHIC_FAMILY).or_else(|| name(ttf_parser::name_id::FAMILY))
+}
+
 /// raw font file for a family (UI previews use these too)
 pub fn font_bytes(family: &str, italic: bool) -> &'static [u8] {
+    if !is_bundled(family) {
+        if let Some(b) = custom_font(family) {
+            return b;
+        }
+    }
     match family {
         "Montserrat" => MONTSERRAT,
         "Space Grotesk" => SPACE_GROTESK,
@@ -96,6 +157,8 @@ pub fn font_bytes(family: &str, italic: bool) -> &'static [u8] {
         "Bangers" => BANGERS,
         "Permanent Marker" => PERMANENT_MARKER,
         "Space Mono" => SPACE_MONO,
+        "Coda" => CODA,
+        "Exo" => EXO,
         _ => INTER_VAR,
     }
 }
@@ -108,6 +171,11 @@ pub struct FontPick {
 }
 
 pub fn pick(family: &str, weight: f64, italic: bool) -> FontPick {
+    // Coda comes as two files: Regular and ExtraBold
+    if family == "Coda" && weight >= 650.0 {
+        let face = Face::from_slice(CODA_EXTRABOLD, 0).expect("bundled font");
+        return FontPick { face, fake_bold: false, fake_italic: italic };
+    }
     let bytes = font_bytes(family, italic);
     let mut face = Face::from_slice(bytes, 0).unwrap_or_else(|| Face::from_slice(INTER_VAR, 0).expect("bundled font"));
     let wght = ttf_parser::Tag::from_bytes(b"wght");
@@ -368,6 +436,21 @@ mod tests {
             // 12 pt, one line at 1.2 line height ≈ 5.1 mm
             assert!((fit.h - 12.0 * cb_core::MM_PER_PT * 1.2).abs() < 0.01, "{f}: {}", fit.h);
         }
+    }
+
+    #[test]
+    fn fonts_carried_in_a_design_are_used() {
+        use base64::Engine as _;
+        let bytes = PACIFICO.to_vec();
+        assert_eq!(family_name(&bytes).as_deref(), Some("Pacifico"));
+        let src = format!("data:font/ttf;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        let l = Layer::text(Side::Front, 0.0, 0.0, 50.0, "Hello", "My Script", 400.0, 12.0, "#000000", Align::Center);
+        let before = layout(&l, "Hello").w;
+        register_fonts(&[cb_core::doc::FontFile { family: "My Script".into(), src }]);
+        let after = layout(&l, "Hello").w;
+        assert!((before - after).abs() > 1.0, "the registered font changes the layout ({before} vs {after})");
+        let p = Layer::text(Side::Front, 0.0, 0.0, 50.0, "Hello", "Pacifico", 400.0, 12.0, "#000000", Align::Center);
+        assert!((after - layout(&p, "Hello").w).abs() < 1e-9, "same as Pacifico itself");
     }
 
     #[test]

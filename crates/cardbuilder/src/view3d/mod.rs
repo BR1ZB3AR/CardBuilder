@@ -113,18 +113,21 @@ impl Viewer3d {
     fn sync_mesh(&mut self, doc: &Doc) {
         let thick = doc.paper.stock.info().thickness;
         let open = if doc.format.fold == Fold::None { 0.0 } else { doc.scene.open };
-        let key = format!("{:?}|{thick}|{open:.1}", doc.format);
+        let pair = doc.format.fold == Fold::None && doc.scene.pair;
+        // the shape part of the key (before the first '|') decides when to re-frame the camera
+        let key = format!("{:?} pair={pair}|{thick}|{open:.1}", doc.format);
         if self.mesh_key.as_deref() == Some(key.as_str()) {
             return;
         }
         let shape_changed = self.mesh_key.as_ref().is_none_or(|k| k.split('|').next() != key.split('|').next());
         self.mesh_key = Some(key);
-        let m = cb_core::card3d::card_mesh(&doc.format, thick, open);
+        let build = |open: f64| if pair { cb_core::card3d::card_pair(&doc.format, thick) } else { cb_core::card3d::card_mesh(&doc.format, thick, open) };
+        let m = build(open);
         let v: Vec<gpu::Vertex> = m.vertices.iter().map(|v| gpu::Vertex { pos: v.pos, nrm: v.nrm, uv: v.uv, face: v.face }).collect();
         let (lo, hi) = (Vec3::from(m.min), Vec3::from(m.max));
         // frame the card as it stands (the centre doesn't jump while opening it)
         if shape_changed {
-            let full = cb_core::card3d::card_mesh(&doc.format, thick, if doc.format.fold == Fold::None { 0.0 } else { 110.0 });
+            let full = build(if doc.format.fold == Fold::None { 0.0 } else { 110.0 });
             let (a, b) = (Vec3::from(full.min), Vec3::from(full.max));
             self.center = (a + b) / 2.0;
             self.radius = ((b - a).length() / 2.0).max(10.0);
@@ -141,6 +144,8 @@ impl Viewer3d {
         let zoom = 1.0;
         match (doc.format.fold, v) {
             (Fold::None, View3d::Front | View3d::Inside) => Cam { yaw: 0.0, pitch: 0.08, zoom },
+            // the pair: both cards in view, a little from the side
+            (Fold::None, View3d::Angle) if doc.scene.pair => Cam { yaw: 0.32, pitch: 0.2, zoom },
             (Fold::None, View3d::Angle) => Cam { yaw: 0.55, pitch: 0.22, zoom },
             (Fold::None, View3d::Back) => Cam { yaw: PI, pitch: 0.08, zoom },
             // book-style card: the front cover faces out to the left, the back cover to the right
@@ -201,7 +206,8 @@ impl Viewer3d {
         let view = Mat4::look_at_rh(eye, target, Vec3::Y);
         let proj = Mat4::perspective_rh(30f32.to_radians(), aspect, (dist * 0.05).max(1.0), dist + self.radius * 8.0);
         // key light: from the chosen side, high and in front
-        let az = (doc.scene.light_angle as f32).to_radians();
+        // the studio light turns with the camera, so whichever side you look at is lit
+        let az = (doc.scene.light_angle as f32).to_radians() + self.cam.yaw as f32;
         let el = 52f32.to_radians();
         let key = Vec3::new(az.sin() * el.cos(), el.sin(), az.cos() * el.cos()).normalize();
         let r = self.radius * 2.2;

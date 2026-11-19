@@ -123,6 +123,40 @@ pub fn card_mesh(fmt: &CardFormat, thickness: f64, open: f64) -> CardMesh {
     m
 }
 
+/// Two flat cards side by side, like a business-card mockup: the left one shows its front, the
+/// right one is turned round to show its back. Both are turned a little towards each other.
+pub fn card_pair(fmt: &CardFormat, thickness: f64) -> CardMesh {
+    let one = card_mesh(fmt, thickness, 0.0);
+    let w = fmt.w;
+    let turn = 14f64.to_radians();
+    let a = placed(&one, turn, [-w * 0.56, 0.0, 0.0]);
+    let b = placed(&one, std::f64::consts::PI - turn, [w * 0.56, 0.0, -w * 0.1]);
+    let mut m = CardMesh { min: [f32::MAX; 3], max: [f32::MIN; 3], ..Default::default() };
+    for part in [a, b] {
+        let base = m.vertices.len() as u32;
+        m.vertices.extend(part.vertices);
+        m.indices.extend(part.indices.iter().map(|i| i + base));
+    }
+    for v in &m.vertices {
+        for k in 0..3 {
+            m.min[k] = m.min[k].min(v.pos[k]);
+            m.max[k] = m.max[k].max(v.pos[k]);
+        }
+    }
+    m
+}
+
+/// a copy of `m` turned by `yaw` radians round the vertical axis through x = z = 0, then moved
+fn placed(m: &CardMesh, yaw: f64, offset: V3) -> CardMesh {
+    let (s, c) = yaw.sin_cos();
+    let rot = |v: [f32; 3]| -> [f64; 3] {
+        let (x, y, z) = (v[0] as f64, v[1] as f64, v[2] as f64);
+        [x * c + z * s, y, -x * s + z * c]
+    };
+    let vertices = m.vertices.iter().map(|v| Vertex { pos: f3(add(rot(v.pos), offset)), nrm: f3(rot(v.nrm)), ..*v }).collect();
+    CardMesh { vertices, indices: m.indices.clone(), min: m.min, max: m.max }
+}
+
 fn add_panel(m: &mut CardMesh, p: &Panel, fmt: &CardFormat, sw: f64, sh: f64) {
     let (x, y, w, h) = p.rect;
     let seg = 8;
@@ -236,6 +270,21 @@ mod tests {
         let m = card_mesh(&fmt, 0.4, 180.0);
         assert!(m.vertices.iter().filter(|v| v.face == 1.0).all(|v| v.nrm[2] > 0.99));
         assert!(m.vertices.iter().filter(|v| v.face == 0.0).all(|v| v.nrm[2] < -0.99));
+    }
+
+    #[test]
+    fn the_pair_shows_a_front_and_a_back_to_the_camera() {
+        let fmt = CardFormat::from_preset(preset("bc-eu").unwrap());
+        let m = card_pair(&fmt, 0.4);
+        // left card: its front print faces the camera (+z); right card: its back print does
+        let facing = |face: f32, left: bool| m.vertices.iter().filter(|v| v.face == face && (v.pos[0] < 0.0) == left).all(|v| v.nrm[2] > 0.9);
+        assert!(facing(0.0, true), "left card shows its front");
+        assert!(facing(1.0, false), "right card shows its back");
+        assert!(m.min[0] < -fmt.w as f32 && m.max[0] > fmt.w as f32, "side by side");
+        // the cards don't overlap
+        let right_of_left = m.vertices.iter().filter(|v| v.pos[0] < 0.0).map(|v| v.pos[0]).fold(f32::MIN, f32::max);
+        let left_of_right = m.vertices.iter().filter(|v| v.pos[0] >= 0.0).map(|v| v.pos[0]).fold(f32::MAX, f32::min);
+        assert!(right_of_left < left_of_right, "{right_of_left} vs {left_of_right}");
     }
 
     #[test]

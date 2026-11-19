@@ -45,6 +45,22 @@ pub enum Category {
 }
 
 impl Category {
+    /// a short stable name for files (templates say which category they belong in)
+    pub fn id(self) -> &'static str {
+        match self {
+            Category::Business => "business",
+            Category::Id => "id",
+            Category::Game => "game",
+            Category::Postcard => "postcard",
+            Category::Greeting => "greeting",
+            Category::Tent => "tent",
+            Category::Tag => "tag",
+            Category::Custom => "custom",
+        }
+    }
+    pub fn from_id(id: &str) -> Category {
+        Category::ALL.into_iter().find(|c| c.id() == id).unwrap_or(Category::Custom)
+    }
     pub const ALL: [Category; 8] = [Category::Business, Category::Id, Category::Game, Category::Postcard, Category::Greeting, Category::Tent, Category::Tag, Category::Custom];
     pub fn name(self) -> &'static str {
         match self {
@@ -86,11 +102,22 @@ pub struct Preset {
     pub h: f64,
     pub radius: f64,
     pub fold: Fold,
+    /// a group inside the category (shown together under its own heading)
+    pub group: Option<&'static str>,
 }
 
 const fn p(id: &'static str, category: Category, name: &'static str, note: &'static str, w: f64, h: f64, radius: f64, fold: Fold) -> Preset {
-    Preset { id, category, name, note, w, h, radius, fold }
+    Preset { id, category, name, note, w, h, radius, fold, group: None }
 }
+
+/// a preset in a group
+#[allow(clippy::too_many_arguments)]
+const fn pg(id: &'static str, category: Category, group: &'static str, name: &'static str, note: &'static str, w: f64, h: f64, radius: f64) -> Preset {
+    Preset { id, category, name, note, w, h, radius, fold: Fold::None, group: Some(group) }
+}
+
+/// the group of Ingress agent biocards in Playing & game cards
+pub const INGRESS_BIOCARD: &str = "Ingress Biocard";
 
 use Category::*;
 pub const PRESETS: &[Preset] = &[
@@ -112,8 +139,8 @@ pub const PRESETS: &[Preset] = &[
     p("game-tarot", Game, "Tarot", "70 × 120 mm", 70.0, 120.0, 4.0, Fold::None),
     p("game-mini", Game, "Mini", "44 × 63 mm · board-game cards", 44.0, 63.0, 3.0, Fold::None),
     p("game-square", Game, "Square", "70 × 70 mm", 70.0, 70.0, 3.0, Fold::None),
-    p("game-biocard-enl", Game, "Ingress Biocard (ENL)", "2.5 × 3.5 in · Enlightened agent card", 63.5, 88.9, 3.0, Fold::None),
-    p("game-biocard-res", Game, "Ingress Biocard (RES)", "2.5 × 3.5 in · Resistance agent card", 63.5, 88.9, 3.0, Fold::None),
+    pg("game-biocard-enl", Game, INGRESS_BIOCARD, "Enlightened", "2.5 × 3.5 in · green agent card", 63.5, 88.9, 3.0),
+    pg("game-biocard-res", Game, INGRESS_BIOCARD, "Resistance", "2.5 × 3.5 in · blue agent card", 63.5, 88.9, 3.0),
     p("post-a6", Postcard, "A6 postcard", "148 × 105 mm", 148.0, 105.0, 0.0, Fold::None),
     p("post-4x6", Postcard, "4 × 6 in postcard", "152 × 102 mm · US", 152.4, 101.6, 0.0, Fold::None),
     p("post-5x7", Postcard, "5 × 7 in invitation", "127 × 178 mm · weddings, parties", 127.0, 177.8, 0.0, Fold::None),

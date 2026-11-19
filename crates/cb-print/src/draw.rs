@@ -8,7 +8,7 @@
 use crate::canvas::{Canvas, Paint, SkiaCanvas};
 use crate::color::Rgba;
 use crate::images::ImageCache;
-use cb_core::doc::{Align, BgMode, Doc, Foil, Layer, LayerType, ShapeKind, Side};
+use cb_core::doc::{Align, BgMode, Doc, Foil, Layer, LayerType, ShapeKind, Side, VAlign};
 use resvg::tiny_skia::{FillRule, Path, PathBuilder, Pixmap, Rect, Transform};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +91,7 @@ pub fn foil_paint(foil: Foil, w: f64, h: f64, opacity: f64) -> Paint {
 /// Draw side `side` of the card. `base` maps design mm (origin at the trim's top-left) onto the
 /// canvas. Everything is clipped to the bleed box.
 pub fn draw_side(c: &mut dyn Canvas, doc: &Doc, side: Side, o: &DrawOptions, imgs: &ImageCache, base: Transform) {
+    crate::text::register_fonts(&doc.fonts);
     let f = &doc.format;
     let (sw, sh) = f.sheet();
     let b = f.bleed;
@@ -162,7 +163,7 @@ fn ink(l: &Layer, o: &DrawOptions, hex: &str, w: f64, h: f64) -> Paint {
 
 /// the box a layer takes on the card (text boxes follow their text), mm
 pub fn layer_size(l: &Layer, fill: &dyn Fn(&str) -> String) -> (f64, f64) {
-    if l.kind == LayerType::Text {
+    if l.kind == LayerType::Text && l.valign.is_none() {
         let t = l.text_for(fill);
         let fit = crate::text::fit(l, &t);
         (l.w, fit.h.max(0.5))
@@ -186,11 +187,27 @@ pub fn draw_layer(c: &mut dyn Canvas, l: &Layer, o: &DrawOptions, imgs: &ImageCa
             }
             let box_w = l.w / k;
             let Some(path) = fit.block.path(l.align.unwrap_or(Align::Center), box_w) else { return };
-            let tts = ts.pre_scale(k as f32, k as f32);
-            let paint = ink(l, o, l.color.as_deref().unwrap_or("#000000"), box_w, fit.block.h);
-            c.fill(&path, &paint, tts, FillRule::Winding);
-            if fit.block.fake_bold() {
-                c.stroke(&path, &paint, (crate::text::BASE * 0.035) as f32, tts);
+            // a text frame puts the block at its top or bottom
+            let shift = match l.valign {
+                Some(VAlign::Top) => -l.h / 2.0 + fit.h / 2.0,
+                Some(VAlign::Bottom) => l.h / 2.0 - fit.h / 2.0,
+                _ => 0.0,
+            };
+            let tts = ts.pre_translate(0.0, shift as f32).pre_scale(k as f32, k as f32);
+            let col = l.color.as_deref().unwrap_or("#000000");
+            // see-through letters (an outline-only number) have no fill at all, in any finish
+            if crate::color::hex_alpha(col) > 0.0 {
+                let paint = ink(l, o, col, box_w, fit.block.h);
+                c.fill(&path, &paint, tts, FillRule::Winding);
+                if fit.block.fake_bold() {
+                    c.stroke(&path, &paint, (crate::text::BASE * 0.035) as f32, tts);
+                }
+            }
+            // an outline round the letters (width in mm)
+            if let (Some(sc), Some(sw)) = (l.stroke.as_deref(), l.stroke_w) {
+                if sw > 0.0 {
+                    c.stroke(&path, &ink(l, o, sc, box_w, fit.block.h), (sw / k) as f32, tts);
+                }
             }
         }
         LayerType::Image => {

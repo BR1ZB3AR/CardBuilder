@@ -4,7 +4,7 @@
 use crate::app::{CardBuilderApp, Tool, Unit, View3d};
 use crate::style::{icon, icons, semibold, P};
 use crate::widgets::seg;
-use cb_core::doc::{ShapeKind, Side};
+use cb_core::doc::ShapeKind;
 use cb_core::Fold;
 use egui::{pos2, vec2, Align, Align2, Color32, CornerRadius, FontId, Layout, Rect, RichText, Sense, Stroke, StrokeKind, Ui, UiBuilder};
 use lucide_icons::Icon;
@@ -91,27 +91,25 @@ impl CardBuilderApp {
     pub(crate) fn card_pane(&mut self, ui: &mut Ui, rect: Rect, now: f64) {
         let fmt = self.doc.format.clone();
         let sub = format!("{} · {}", self.format_title(), fmt.size_label());
-        let mut side = self.side;
         pane_head(ui, rect, "Card", Some(&sub), |ui| {
-            // right to left: shown as Front · Back
-            seg(ui, &mut side, &[(Side::Back, fmt.side_name(Side::Back)), (Side::Front, fmt.side_name(Side::Front))], true);
-            ui.add_space(6.0);
             self.record_nav(ui);
         });
-        if side != self.side {
-            self.side = side;
-            self.selected = None;
-        }
 
         let body = Rect::from_min_max(pos2(rect.left(), rect.top() + HEAD), rect.max);
         let record = self.current_record();
         let inp = crate::canvas::Input { doc: &self.doc, side: self.side, record, tool: self.tool, selected: self.selected.as_deref(), guides: self.prefs.guides, snap: self.prefs.snap };
         let ev = self.canvas.show(ui, body, &inp, &mut self.render);
+        if let Some(s) = ev.activate {
+            self.side = s;
+        }
         if let Some(sel) = ev.select {
+            if let Some(l) = sel.as_deref().and_then(|id| self.doc.layer(id)) {
+                self.side = l.side;
+            }
             self.selected = sel;
         }
         if let Some((mut l, key)) = ev.set_layer {
-            if l.kind == cb_core::doc::LayerType::Text {
+            if l.kind == cb_core::doc::LayerType::Text && l.valign.is_none() {
                 l.h = cb_print::draw::layer_size(&l, &self.doc.filler(record)).1;
             }
             self.edit(now, Some(&key), |d| {
@@ -124,12 +122,14 @@ impl CardBuilderApp {
             self.focus_text = true;
             self.prefs.tab = crate::app::Tab::Design;
         }
-        if let Some(at) = ev.place {
+        if let Some((side, x, y)) = ev.place {
+            self.side = side;
+            let at = Some((x, y));
             match self.tool {
-                Tool::Text => self.add_text(now, Some(at)),
-                Tool::Shape => self.add_shape(now, Some(at), ShapeKind::Rect),
-                Tool::Qr => self.add_qr(now, Some(at)),
-                Tool::Image => self.pick_image(now, Some(at)),
+                Tool::Text => self.add_text(now, at),
+                Tool::Shape => self.add_shape(now, at, ShapeKind::Rect),
+                Tool::Qr => self.add_qr(now, at),
+                Tool::Image => self.pick_image(now, at),
                 _ => {}
             }
         }
@@ -272,7 +272,7 @@ impl CardBuilderApp {
         }
 
         // view bar (bottom centre): auto-rotate · flip · reset · how far a folded card is open
-        let w = if folded { 360.0 } else { 220.0 };
+        let w = if folded { 360.0 } else { 254.0 };
         let vb = Rect::from_center_size(pos2(body.center().x, body.bottom() - 30.0), vec2(w, 38.0));
         let mut scene = self.doc.scene.clone();
         let mut reset = false;
@@ -285,6 +285,9 @@ impl CardBuilderApp {
                         scene.auto_rotate = !scene.auto_rotate;
                     }
                     flip = tool_button(ui, Icon::FlipHorizontal2, false, "Turn the card over");
+                    if !folded && tool_button(ui, Icon::Columns2, scene.pair, if scene.pair { "Front and back side by side — click for one card" } else { "One card — click to show the back beside it" }) {
+                        scene.pair = !scene.pair;
+                    }
                     reset = text_button(ui, "Reset view", false, 78.0);
                     if folded {
                         ui.add_space(6.0);

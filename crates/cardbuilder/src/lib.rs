@@ -10,6 +10,8 @@ pub mod gpu;
 mod panes;
 mod sidebar;
 mod style;
+mod templates;
+mod thumbs;
 mod theme_menu;
 mod themes;
 mod titlebar;

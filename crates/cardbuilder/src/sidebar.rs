@@ -4,7 +4,7 @@
 use crate::app::{kind_label, CardBuilderApp, Tab};
 use crate::style::{icon, icons, semibold, P};
 use crate::widgets::{big_button, button, hex_color, hint, section, seg, slider_row, swatch, to_hex, toggle_row, BtnKind};
-use cb_core::doc::{Align, Backdrop, BgMode, Foil, Layer, LayerType, QrEcc, QrKind, ShapeKind, Stock};
+use cb_core::doc::{Align, Backdrop, BgMode, Foil, Layer, LayerType, QrEcc, QrKind, ShapeKind, Stock, VAlign};
 use cb_core::Fold;
 use egui::{vec2, Align as EAlign, Align2, Color32, CornerRadius, FontFamily, FontId, Layout, RichText, Sense, Stroke, StrokeKind, Ui};
 use lucide_icons::Icon;
@@ -115,7 +115,50 @@ impl CardBuilderApp {
 
     // ================================================================== Design
 
+    /// a template's choice (e.g. a biocard's faction) as a row of coloured buttons
+    fn variants_section(&mut self, ui: &mut Ui, now: f64) {
+        let Some(v) = self.doc.variants.clone() else { return };
+        let mut pick = None;
+        section(ui, &v.label, v.hint.as_deref(), None, |ui| {
+            let n = v.options.len().max(1) as f32;
+            let gap = 8.0;
+            let w = (ui.available_width() - gap * (n - 1.0)) / n;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (i, o) in v.options.iter().enumerate() {
+                    let on = v.active == Some(i);
+                    let (r, resp) = ui.allocate_exact_size(egui::vec2(w, 34.0), egui::Sense::click());
+                    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &o.name));
+                    let c = crate::widgets::hex_color(&o.color);
+                    let p = ui.painter();
+                    if on {
+                        p.rect_filled(r, egui::CornerRadius::same(8), c);
+                    } else {
+                        p.rect_filled(r, egui::CornerRadius::same(8), if resp.hovered() { c.gamma_multiply(0.22) } else { c.gamma_multiply(0.08) });
+                        p.rect_stroke(r, egui::CornerRadius::same(8), egui::Stroke::new(1.5, c), egui::StrokeKind::Inside);
+                    }
+                    // white on a dark button, near-black on a light one
+                    let lum = 0.3 * c.r() as f32 + 0.59 * c.g() as f32 + 0.11 * c.b() as f32;
+                    let text = if on { if lum > 165.0 { Color32::from_rgb(20, 20, 24) } else { Color32::WHITE } } else { P.text };
+                    p.text(r.center(), egui::Align2::CENTER_CENTER, &o.name, egui::FontId::new(13.0, semibold()), text);
+                    if resp.clicked() && !on {
+                        pick = Some(i);
+                    }
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                }
+            });
+        });
+        if let Some(i) = pick {
+            self.edit(now, None, |d| d.apply_variant(i));
+            let name = self.doc.variants.as_ref().and_then(|v| v.options.get(i)).map(|o| o.name.clone()).unwrap_or_default();
+            self.say(format!("{}: {name}", v.label), now);
+        }
+    }
+
     fn design_tab(&mut self, ui: &mut Ui, now: f64) {
+        self.variants_section(ui, now);
         let side_name = self.doc.format.side_name(self.side).to_lowercase();
         let sub = format!("Add to the {side_name} — or pick a tool and click the card");
         section(ui, "Add", Some(&sub), None, |ui| {
@@ -154,7 +197,13 @@ impl CardBuilderApp {
                 .layers_on(side)
                 .map(|l| {
                     let name = match l.kind {
-                        LayerType::Text => l.text_for(&fill).lines().next().unwrap_or("").to_string(),
+                        // its words; a layer named for its job (a template's "Number") says so too
+                        LayerType::Text => {
+                            let t = l.text_for(&fill).lines().next().unwrap_or("").to_string();
+                            let own = l.text.as_deref().and_then(|s| s.lines().next()).unwrap_or("");
+                            let named = !l.name.is_empty() && l.name != "Text" && !own.to_lowercase().contains(&l.name.to_lowercase());
+                            if named && !t.trim().is_empty() { format!("{} · {t}", l.name) } else { t }
+                        }
                         LayerType::Qr => l.qr.as_ref().map(|q| q.summary()).unwrap_or_else(|| l.name.clone()),
                         _ => l.name.clone(),
                     };
@@ -168,7 +217,7 @@ impl CardBuilderApp {
                 let on = self.selected.as_deref() == Some(l.id.as_str());
                 let w = ui.available_width();
                 let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &l.name));
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name.as_str()));
                 if on || resp.hovered() {
                     ui.painter().rect_filled(r, CornerRadius::same(7), if on { P.accent_weak } else { P.panel2 });
                 }
@@ -229,7 +278,11 @@ impl CardBuilderApp {
                         self.focus_text = false;
                     }
                     if resp.changed() {
-                        n.name = t.lines().next().unwrap_or("Text").chars().take(40).collect();
+                        // a layer named after its words follows them; one with a name of its own keeps it
+                        let was: String = n.text.as_deref().unwrap_or("").lines().next().unwrap_or("Text").chars().take(40).collect();
+                        if n.name == was || n.name == "Text" || n.name.is_empty() {
+                            n.name = t.lines().next().unwrap_or("Text").chars().take(40).collect();
+                        }
                         n.text = Some(t);
                     }
                     if !columns.is_empty() {
@@ -249,31 +302,58 @@ impl CardBuilderApp {
                         });
                     }
                     ui.add_space(4.0);
-                    // font, in its own typeface
+                    // font, in its own typeface (a design font egui hasn't got yet shows in Inter)
                     let cur = n.font.clone().unwrap_or_else(|| "Inter".into());
+                    let in_face = |f: &str, size: f32| {
+                        let t = RichText::new(f).size(size);
+                        if self.previewable_font(f) {
+                            t.family(FontFamily::Name(f.to_string().into()))
+                        } else {
+                            t
+                        }
+                    };
+                    let design_fonts: Vec<String> = self.doc.fonts.iter().map(|f| f.family.clone()).collect();
+                    let mut add_font = false;
                     ui.horizontal(|ui| {
                         let lbl = ui.label("Font");
                         ui.with_layout(Layout::right_to_left(EAlign::Center), |ui| {
                             egui::ComboBox::new("font", "")
-                                .selected_text(RichText::new(&cur).family(FontFamily::Name(cur.clone().into())).size(15.0))
+                                .selected_text(in_face(&cur, 15.0))
                                 .width(180.0)
-                                .height(420.0)
+                                .height(440.0)
                                 .show_ui(ui, |ui| {
+                                    if !design_fonts.is_empty() {
+                                        ui.label(RichText::new("IN THIS DESIGN").size(10.0).color(P.muted));
+                                        for f in &design_fonts {
+                                            if ui.selectable_label(&cur == f, in_face(f, 16.0)).clicked() {
+                                                n.font = Some(f.clone());
+                                            }
+                                        }
+                                    }
                                     let mut last_kind = None;
                                     for (f, kind) in cb_print::text::FONTS {
                                         if last_kind != Some(kind) {
                                             ui.label(RichText::new(kind.name().to_uppercase()).size(10.0).color(P.muted));
                                             last_kind = Some(kind);
                                         }
-                                        if ui.selectable_label(cur == f, RichText::new(f).family(FontFamily::Name(f.into())).size(16.0)).clicked() {
+                                        if ui.selectable_label(cur == f, in_face(f, 16.0)).clicked() {
                                             n.font = Some(f.into());
                                         }
+                                    }
+                                    ui.separator();
+                                    if ui.button("Add a font file…").on_hover_text("A .ttf or .otf file — it's saved inside the design").clicked() {
+                                        add_font = true;
                                     }
                                 })
                                 .response
                                 .labelled_by(lbl.id);
                         });
                     });
+                    if add_font {
+                        if let Some(fam) = self.add_font_file(now) {
+                            n.font = Some(fam);
+                        }
+                    }
                     // size in points
                     ui.horizontal(|ui| {
                         let lbl = ui.label("Size");
@@ -326,6 +406,23 @@ impl CardBuilderApp {
                         n.wrap = Some(wrap);
                     }
                     hint(ui, if wrap { "Long lines break between words. Drag the side handles to change the width." } else { "Lines longer than the box shrink to fit it — handy for names from a spreadsheet." });
+                    let mut va = n.valign;
+                    ui.horizontal(|ui| {
+                        ui.label("Text box");
+                        ui.with_layout(Layout::right_to_left(EAlign::Center), |ui| {
+                            seg(ui, &mut va, &[(Some(VAlign::Bottom), "Bottom"), (Some(VAlign::Middle), "Middle"), (Some(VAlign::Top), "Top"), (None, "Fits")], true);
+                        });
+                    });
+                    if va != n.valign {
+                        if n.valign.is_none() {
+                            // becoming a frame: it keeps the height it has now
+                            n.h = cb_print::draw::layer_size(&n, &self.doc.filler(self.current_record())).1;
+                        }
+                        n.valign = va;
+                    }
+                    if n.valign.is_some() {
+                        hint(ui, "A frame keeps its height (drag its top and bottom handles); the text sits at its top, middle or bottom however long it gets.");
+                    }
                     let mut lh = n.line_height.unwrap_or(1.2);
                     if slider_row(ui, "Line height", &mut lh, 0.7..=2.5, 0.05, |v| format!("{v:.2}"), true) {
                         n.line_height = Some(lh);
@@ -334,9 +431,45 @@ impl CardBuilderApp {
                     if slider_row(ui, "Letter spacing", &mut ls, -0.1..=0.6, 0.01, |v| format!("{v:.2} em"), true) {
                         n.letter_spacing = Some(ls);
                     }
-                    let mut col = n.color.clone().unwrap_or_else(|| "#000000".into());
-                    if color_row(ui, "Colour", &mut col) {
-                        n.color = Some(col);
+                    // filled letters, an outline round them, or both (never neither)
+                    let col = n.color.clone().unwrap_or_else(|| "#000000".into());
+                    let opaque = |c: &str| c.trim_start_matches('#').get(..6).map(|h| format!("#{h}")).unwrap_or_else(|| "#000000".into());
+                    let mut filled = cb_print::color::hex_alpha(&col) > 0.0;
+                    let mut outlined = n.stroke.is_some() && n.stroke_w.unwrap_or(0.0) > 0.0;
+                    if toggle_row(ui, "Fill", &mut filled) {
+                        n.color = Some(if filled { opaque(&col) } else { format!("{}00", opaque(&col)) });
+                        if !filled && !outlined {
+                            n.stroke = Some(opaque(&col));
+                            n.stroke_w = Some(0.25);
+                            outlined = true;
+                        }
+                    }
+                    if filled {
+                        let mut c = opaque(&col);
+                        if color_row(ui, "Colour", &mut c) {
+                            n.color = Some(c);
+                        }
+                    }
+                    if toggle_row(ui, "Outline", &mut outlined) {
+                        if outlined {
+                            n.stroke = Some(n.stroke.clone().unwrap_or_else(|| "#1f2347".into()));
+                            n.stroke_w = Some(n.stroke_w.filter(|w| *w > 0.0).unwrap_or(0.25));
+                        } else {
+                            n.stroke_w = Some(0.0);
+                            if !filled {
+                                n.color = Some(opaque(&col));
+                            }
+                        }
+                    }
+                    if outlined {
+                        let mut sw = n.stroke_w.unwrap_or(0.25);
+                        if slider_row(ui, "Outline width", &mut sw, 0.05..=2.0, 0.05, |v| format!("{v:.2} mm"), true) {
+                            n.stroke_w = Some(sw);
+                        }
+                        let mut sc = n.stroke.clone().unwrap_or_else(|| "#1f2347".into());
+                        if color_row(ui, "Outline colour", &mut sc) {
+                            n.stroke = Some(sc);
+                        }
                     }
                 });
             }
@@ -523,7 +656,7 @@ impl CardBuilderApp {
             }
         });
         if n != l {
-            if n.kind == LayerType::Text {
+            if n.kind == LayerType::Text && n.valign.is_none() {
                 n.h = cb_print::draw::layer_size(&n, &self.doc.filler(self.current_record())).1;
             }
             let id = l.id.clone();
@@ -680,17 +813,21 @@ impl CardBuilderApp {
         section(ui, "Card", None, None, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(icon(crate::formats::category_icon(f.category()))).family(icons()).size(18.0).color(P.accent));
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(&title).family(semibold()));
-                    ui.label(RichText::new(format!("{} · {}", f.size_label(), f.fold.label())).size(11.5).color(P.muted));
-                });
+                // the button first, so a long name is cut short instead of running under it
                 ui.with_layout(Layout::right_to_left(EAlign::Center), |ui| {
                     let r = button(ui, None, "Change…", BtnKind::Normal, true);
                     anchor = r.rect;
                     if r.clicked() {
                         self.popups.format_top = !self.popups.format_top;
                         self.popups.format_cat = None;
+                        if self.popups.format_top {
+                            self.rescan_templates();
+                        }
                     }
+                    ui.with_layout(Layout::top_down(EAlign::Min), |ui| {
+                        ui.add(egui::Label::new(RichText::new(&title).family(semibold())).truncate());
+                        ui.add(egui::Label::new(RichText::new(format!("{} · {}", f.size_label(), f.fold.label())).size(11.5).color(P.muted)).truncate());
+                    });
                 });
             });
             if (f.w - f.h).abs() > 0.01 {
@@ -867,6 +1004,37 @@ impl CardBuilderApp {
         self.fix_selection();
     }
 
+    /// Add a font file (.ttf / .otf) to the design: it travels inside the .cb file. Returns the
+    /// family name to use.
+    pub(crate) fn add_font_file(&mut self, now: f64) -> Option<String> {
+        use base64::Engine as _;
+        let path = rfd::FileDialog::new().add_filter("Font", &["ttf", "otf"]).set_title("Add a font").pick_file()?;
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.say(format!("Couldn't read the font: {e}"), now);
+                return None;
+            }
+        };
+        let Some(mut family) = cb_print::text::family_name(&bytes) else {
+            self.say("That isn't a font CardBuilder can use", now);
+            return None;
+        };
+        if cb_print::text::is_bundled(&family) {
+            family = format!("{family} (file)");
+        }
+        let mime = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("otf")) { "font/otf" } else { "font/ttf" };
+        let src = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        let fam = family.clone();
+        self.edit(now, None, |d| {
+            d.fonts.retain(|f| f.family != fam);
+            d.fonts.push(cb_core::doc::FontFile { family: fam.clone(), src });
+        });
+        cb_print::text::register_fonts(&self.doc.fonts);
+        self.say(format!("Added the font {family} — it's saved inside this design"), now);
+        Some(family)
+    }
+
     /// put `{column}` into the selected text layer, or add a text layer with it
     pub(crate) fn insert_field(&mut self, now: f64, column: &str) {
         let field = format!("{{{column}}}");
@@ -954,6 +1122,9 @@ impl CardBuilderApp {
             slider_row(ui, "Light from", &mut sc.light_angle, -90.0..=90.0, 1.0, |v| format!("{v:.0}°"), true);
             toggle_row(ui, "Soft shadows", &mut sc.shadows);
             toggle_row(ui, "Turn slowly", &mut sc.auto_rotate);
+            if !folded {
+                toggle_row(ui, "Front and back side by side", &mut sc.pair);
+            }
             if folded {
                 slider_row(ui, "Opened", &mut sc.open, 0.0..=180.0, 1.0, |v| format!("{v:.0}°"), true);
             }

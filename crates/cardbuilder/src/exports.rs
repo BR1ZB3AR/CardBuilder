@@ -318,7 +318,8 @@ impl CardBuilderApp {
         let has_data = !self.doc.data.is_empty();
         let sub = format!("{} · {} · {}", self.format_title(), fmt.size_label(), fmt.fold.label());
         crate::topbar::dialog(ctx, "print-dialog", "Print sheets", Some(&sub), 800.0, &mut open, |ui| {
-            ui.horizontal_top(|ui| {
+            let mut gap_x = 0.0;
+            let row = ui.horizontal_top(|ui| {
                 // ---- settings
                 ui.vertical(|ui| {
                     ui.set_width(320.0);
@@ -383,7 +384,9 @@ impl CardBuilderApp {
                         save = true;
                     }
                 });
-                ui.separator();
+                ui.add_space(8.0);
+                gap_x = ui.cursor().left();
+                ui.add_space(8.0);
                 // ---- the sheet, to scale
                 ui.vertical(|ui| {
                     let avail = vec2(ui.available_width().max(260.0), 460.0);
@@ -429,6 +432,7 @@ impl CardBuilderApp {
                     }
                 });
             });
+            ui.painter().vline(gap_x, row.response.rect.y_range(), Stroke::new(1.0, P.border));
         });
         if ps != self.doc.print {
             self.edit(now, Some("print-settings"), |d| d.print = ps);

@@ -26,9 +26,14 @@ pub(crate) fn popup(ctx: &egui::Context, id: &str, anchor: Rect, right: bool, op
             .show(ui, |ui| {
                 ui.set_width(width);
                 add(ui);
-            });
+            })
+            .response
+            .rect
     });
-    let outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !anchor.contains(p)));
+    // the pop-up as drawn this frame: the area's remembered size lags a frame behind when the
+    // contents grow (opening a group), which made a click on the new bottom row close it
+    let shown = area.response.rect.union(area.inner);
+    let outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !shown.contains(p) && !anchor.contains(p)));
     // a click in a combo box's list (its own layer) is not "outside"
     let in_other_popup = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| ctx.layer_id_at(p).is_some_and(|l| l.order == egui::Order::Foreground && l.id != area.response.layer_id.id));
     if outside && !in_other_popup {
@@ -176,6 +181,9 @@ impl CardBuilderApp {
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Choose the kind and size of card").clicked() {
                     self.popups.format_top = !self.popups.format_top;
                     self.popups.format_cat = None;
+                    if self.popups.format_top {
+                        self.rescan_templates();
+                    }
                 }
             })
             .response
@@ -256,11 +264,16 @@ impl CardBuilderApp {
         // ---- pop-ups
         let mut open = self.popups.format_top;
         popup(&ctx, "format-top", format_anchor, false, &mut open, 560.0, |ui| self.format_menu(ui, now));
-        self.popups.format_top = open;
+        // the menu closes itself when a template is picked
+        self.popups.format_top = open && self.popups.format_top;
+        if !self.popups.format_top {
+            self.popups.format_seen = false;
+        }
 
         let mut open = self.popups.export;
         let mut chosen: Option<Export> = None;
         let mut save_as = false;
+        let mut save_template = false;
         let mut print = false;
         let fmt = self.doc.format.clone();
         let records = self.doc.records();
@@ -288,11 +301,17 @@ impl CardBuilderApp {
             if menu_row(ui, Icon::Save, "Save as…", ".cb — this app's design file (Ctrl+Shift+S)", false, true) {
                 save_as = true;
             }
+            if menu_row(ui, Icon::LayoutTemplate, "Save as template…", "shows in the card picker, on this computer", false, true) {
+                save_template = true;
+            }
             if has_data && menu_row(ui, Icon::FileSpreadsheet, "Data as CSV", "the card data, to edit in a spreadsheet", false, true) {
                 chosen = Some(Export::Csv);
             }
         });
-        self.popups.export = open && chosen.is_none() && !save_as && !print;
+        self.popups.export = open && chosen.is_none() && !save_as && !print && !save_template;
+        if save_template {
+            self.save_as_template(now);
+        }
         if let Some(e) = chosen {
             self.export(&ctx, e, now);
         }

@@ -25,7 +25,7 @@ bleed, crop marks and the backs lined up for double-sided printing.
   with rounded corners.
 - **Both sides:** front and back, or the outside and inside spreads of a folded card, with bleed,
   trim, safe-area and fold guides, and snapping to centre lines and the safe area.
-- **Artwork:** text in 15 fonts (sizes in points, wrapping or shrink-to-fit), pictures (PNG, JPEG,
+- **Artwork:** text in 17 fonts (sizes in points, wrapping or shrink-to-fit), pictures (PNG, JPEG,
   WebP, GIF, SVG), rectangles, ellipses and lines, and backgrounds in colour, gradient or a picture.
 - **QR codes** for a website, a contact card (vCard), Wi-Fi, a phone number or an email address —
   sharp vectors, with a warning when a code gets too small to scan.
@@ -38,7 +38,11 @@ bleed, crop marks and the backs lined up for double-sided printing.
 - **Print:** print sheets (as many cards per page as fit on A4, A3, SRA3, Letter, …, with crop
   marks and double-sided imposition), a card PDF with bleed and trim boxes, 300 dpi PNGs and a
   2000 px 3D snapshot.
-- **Design files:** `.cb` files with pictures and data inside; New, Open, Save, undo for everything.
+- **Your own templates and fonts:** save any design as a template and it shows in the card
+  picker (in its category and group); add .ttf / .otf fonts, which travel inside the design.
+  A design can offer a choice as coloured buttons (say, a faction: RES, ENL or XFAC), each
+  showing its own layers and setting colours.
+- **Design files:** `.cb` files with pictures, fonts and data inside; New, Open, Save, undo for everything.
 - 31 themes, a custom title bar, and a layout that adapts down to small windows.
 
 ## Build from source
@@ -96,7 +100,7 @@ like a user would.
 
 CardBuilder is released under the [MIT License](LICENSE).
 
-The bundled fonts — Anton, Bangers, Bebas Neue, Cormorant Garamond, Dancing Script, Great Vibes,
+The bundled fonts — Anton, Bangers, Bebas Neue, Coda, Cormorant Garamond, Dancing Script, Exo, Great Vibes,
 Inter, Lora, Montserrat, Oswald, Pacifico, Permanent Marker, Playfair Display, Space Grotesk and
 Space Mono — are licensed under the SIL Open Font License 1.1; see
 [`crates/cardbuilder/assets/fonts`](crates/cardbuilder/assets/fonts).
