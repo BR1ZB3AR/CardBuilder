@@ -656,6 +656,10 @@ pub fn default_doc(format: CardFormat) -> Doc {
     let k = pw.min(ph) / 55.0; // scale from a business card
     let ink = "#1f2347";
     let accent = "#ff7a59";
+    if let Some(faction) = Faction::of_preset(&f.preset) {
+        biocard(&mut doc, faction);
+        return doc;
+    }
     match f.category() {
         Category::Greeting | Category::Postcard | Category::Tent => {
             doc.front = Background { mode: BgMode::Gradient, color: "#1f2347".into(), color2: "#6b3fa0".into(), angle: 60.0, src: None };
@@ -745,6 +749,150 @@ impl Default for Doc {
     fn default() -> Self {
         default_doc(CardFormat::default())
     }
+}
+
+/// JavaScript's `encodeURIComponent`, for SVG data URLs
+fn encode_uri_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// an SVG as a data URL (how pictures live in a design)
+pub fn svg_data_url(svg: &str) -> String {
+    format!("data:image/svg+xml;charset=utf-8,{}", encode_uri_component(svg))
+}
+
+/// the two Ingress factions, for the agent biocard templates
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Faction {
+    Enlightened,
+    Resistance,
+}
+
+impl Faction {
+    pub fn of_preset(id: &str) -> Option<Faction> {
+        match id {
+            "game-biocard-enl" => Some(Faction::Enlightened),
+            "game-biocard-res" => Some(Faction::Resistance),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Faction::Enlightened => "ENLIGHTENED",
+            Faction::Resistance => "RESISTANCE",
+        }
+    }
+    /// (faction colour, dark background, darker background, light text)
+    pub fn colors(self) -> (&'static str, &'static str, &'static str, &'static str) {
+        match self {
+            Faction::Enlightened => ("#03dc03", "#0c2a14", "#020905", "#c9f7cf"),
+            Faction::Resistance => ("#0088ff", "#0b2140", "#02060e", "#cfe6ff"),
+        }
+    }
+}
+
+/// An Ingress agent biocard (the cards agents trade at events): codename, faction, level, a photo
+/// to replace, a few stats and a QR code to the agent's Telegram — the back carries a faction ring.
+/// Only the faction names and colours are used; no game logos or artwork.
+fn biocard(doc: &mut Doc, faction: Faction) {
+    let f = doc.format.clone();
+    let (pw, ph) = (f.w, f.h);
+    // laid out on a 63.5 × 88.9 mm card, scaled to the format
+    let (kx, ky) = (pw / 63.5, ph / 88.9);
+    let k = kx.min(ky);
+    let at = |x: f64, y: f64| (x * kx, y * ky);
+    let (glow, dark, darker, light) = faction.colors();
+    doc.paper = Paper { stock: Stock::Silk, color: Stock::Silk.info().color.into() };
+    doc.front = Background { mode: BgMode::Gradient, color: dark.into(), color2: darker.into(), angle: 90.0, src: None };
+    doc.back = Background { mode: BgMode::Gradient, color: dark.into(), color2: darker.into(), angle: 120.0, src: None };
+    let mut push = |l: Layer| doc.layers.push(l);
+
+    // ---- front
+    let (cx, cy) = at(31.75, 44.45);
+    let mut frame = Layer::rect(Side::Front, cx, cy, pw - 6.0 * k, ph - 6.0 * k, glow);
+    frame.name = "Frame".into();
+    frame.fill = None;
+    frame.stroke = Some(glow.into());
+    frame.stroke_w = Some(0.45);
+    frame.radius = Some(2.0 * k);
+    push(frame);
+    let (x, y) = at(31.75, 9.0);
+    let mut head = Layer::text(Side::Front, x, y, 50.0 * kx, "AGENT BIOCARD", "Oswald", 500.0, 6.5 * k, glow, Align::Center);
+    head.letter_spacing = Some(0.3);
+    push(head);
+    let photo_svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 100 100"><rect width="100" height="100" rx="4" fill="{darker}"/><rect x="1" y="1" width="98" height="98" rx="3.5" fill="none" stroke="{glow}" stroke-width="1.2" stroke-opacity="0.7"/><circle cx="50" cy="38" r="17" fill="{glow}" fill-opacity="0.85"/><path d="M17 99 C17 72 33 61 50 61 C67 61 83 72 83 99 Z" fill="{glow}" fill-opacity="0.85"/><text x="50" y="93" font-family="Inter, sans-serif" font-size="4.1" font-weight="600" text-anchor="middle" fill="{darker}">REPLACE WITH YOUR PHOTO</text></svg>"##
+    );
+    let (x, y) = at(31.75, 30.0);
+    let mut photo = Layer::new("Agent photo — Replace…", LayerType::Image, Side::Front, x, y, 34.0 * k, 34.0 * k);
+    photo.src = Some(svg_data_url(&photo_svg));
+    push(photo);
+    let (x, y) = at(47.5, 15.0);
+    let mut badge = Layer::rect(Side::Front, x, y, 10.0 * k, 5.4 * k, glow);
+    badge.name = "Level badge".into();
+    badge.radius = Some(1.0 * k);
+    push(badge);
+    let (x, y) = at(47.5, 15.0);
+    push(Layer::text(Side::Front, x, y, 9.0 * k, "L16", "Oswald", 600.0, 8.0 * k, darker, Align::Center));
+    let (x, y) = at(31.75, 53.5);
+    push(Layer::text(Side::Front, x, y, 52.0 * kx, "AgentCodename", "Oswald", 600.0, 16.0 * k, "#ffffff", Align::Center));
+    let (x, y) = at(31.75, 60.3);
+    let mut fac = Layer::text(Side::Front, x, y, 52.0 * kx, faction.name(), "Oswald", 400.0, 7.0 * k, glow, Align::Center);
+    fac.letter_spacing = Some(0.28);
+    push(fac);
+    let (x, y) = at(23.0, 73.5);
+    let mut stats = Layer::text(Side::Front, x, y, 31.0 * kx, "Level 16\nAgent since 2014\nKuala Lumpur\n@agentcodename", "Inter", 500.0, 5.6 * k, light, Align::Left);
+    stats.line_height = Some(1.5);
+    stats.name = "Stats".into();
+    push(stats);
+    let (x, y) = at(50.0, 73.5);
+    let mut qr = Layer::qr(Side::Front, x, y, 17.0 * k, QrSpec::url("https://t.me/agentcodename"), "#0a0f0c");
+    qr.fill = Some("#ffffff".into());
+    qr.radius = Some(1.0);
+    push(qr);
+
+    // ---- back: a faction ring
+    let (bx, by) = at(31.75, 38.0);
+    let mut ring = Layer::rect(Side::Back, bx, by, 40.0 * k, 40.0 * k, glow);
+    ring.shape = Some(ShapeKind::Ellipse);
+    ring.fill = None;
+    ring.stroke = Some(glow.into());
+    ring.stroke_w = Some(1.3 * k);
+    ring.name = "Outer ring".into();
+    push(ring);
+    let mut inner = Layer::rect(Side::Back, bx, by, 27.0 * k, 27.0 * k, glow);
+    inner.shape = Some(ShapeKind::Ellipse);
+    inner.fill = None;
+    inner.stroke = Some(glow.into());
+    inner.stroke_w = Some(0.5 * k);
+    inner.opacity = 0.6;
+    inner.name = "Inner ring".into();
+    push(inner);
+    let mut core = Layer::rect(Side::Back, bx, by, 9.0 * k, 9.0 * k, glow);
+    core.rot = 45.0;
+    core.name = "Core".into();
+    push(core);
+    let mut frame_b = Layer::rect(Side::Back, cx, cy, pw - 6.0 * k, ph - 6.0 * k, glow);
+    frame_b.name = "Frame".into();
+    frame_b.fill = None;
+    frame_b.stroke = Some(glow.into());
+    frame_b.stroke_w = Some(0.45);
+    frame_b.radius = Some(2.0 * k);
+    push(frame_b);
+    let (x, y) = at(31.75, 68.0);
+    let mut name = Layer::text(Side::Back, x, y, 52.0 * kx, faction.name(), "Oswald", 600.0, 11.0 * k, glow, Align::Center);
+    name.letter_spacing = Some(0.2);
+    push(name);
+    let (x, y) = at(31.75, 76.0);
+    push(Layer::text(Side::Back, x, y, 52.0 * kx, "Trade me at the next anomaly", "Inter", 400.0, 5.5 * k, light, Align::Center));
 }
 
 /// how far a folded card stands open in 3D at first: a greeting card like a book on a shelf,
@@ -929,6 +1077,20 @@ mod tests {
             for l in &d.layers {
                 assert!(l.x > 0.0 && l.x < sw && l.y > 0.0 && l.y < sh, "{}: {} at {},{}", p.id, l.name, l.x, l.y);
             }
+        }
+    }
+
+    #[test]
+    fn biocards_in_both_factions() {
+        for (id, colour, name) in [("game-biocard-enl", "#03dc03", "ENLIGHTENED"), ("game-biocard-res", "#0088ff", "RESISTANCE")] {
+            let d = default_doc(CardFormat::from_preset(preset(id).unwrap()));
+            assert_eq!((d.format.w, d.format.h), (63.5, 88.9), "{id}: trading-card size, portrait");
+            assert!(d.layers.iter().any(|l| l.text.as_deref() == Some("AgentCodename") && l.side == Side::Front), "{id}");
+            assert!(d.layers.iter().any(|l| l.text.as_deref() == Some(name)), "{id}: faction named");
+            assert!(d.layers.iter().any(|l| l.kind == LayerType::Qr && l.qr.as_ref().unwrap().text.contains("t.me/")), "{id}: Telegram QR");
+            assert!(d.layers.iter().any(|l| l.kind == LayerType::Image && l.src.as_deref().is_some_and(|s| s.starts_with("data:image/svg+xml"))), "{id}: photo to replace");
+            assert!(d.layers.iter().any(|l| l.stroke.as_deref() == Some(colour)), "{id}: faction colour");
+            assert!(d.layers_on(Side::Back).count() >= 4, "{id}: the back has the faction ring");
         }
     }
 

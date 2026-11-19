@@ -13,9 +13,10 @@ fn main() {
     if ids.is_empty() {
         ids = ["bc-eu", "greet-a6", "game-poker", "tent-place", "id-cr80"].iter().map(|s| s.to_string()).collect();
     }
-    let imgs = ImageCache::default();
+    let mut imgs = ImageCache::default();
     for id in ids {
         let mut doc = default_doc(CardFormat::from_preset(preset(&id).expect("preset id")));
+        imgs.prepare(cb_print::image_srcs(&doc));
         for side in [Side::Front, Side::Back] {
             let png = cb_print::sheets::side_png(&doc, side, None, 300.0, true, &imgs).unwrap();
             std::fs::write(out.join(format!("{id}-{side:?}.png").to_lowercase()), png).unwrap();

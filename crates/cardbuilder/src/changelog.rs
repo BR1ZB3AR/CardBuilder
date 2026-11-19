@@ -1,9 +1,23 @@
 //! Release notes, newest first. Every update or bugfix bumps the patch version
 //! (v0.0.1 → v0.0.2 …) — keep all three crates' `Cargo.toml` in sync.
 
-pub type Release = (&'static str, &'static str, &'static str, &'static [(&'static str, &'static str)]);
+pub type Release = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
 
-pub const CHANGELOG: &[Release] = &[(
+pub const CHANGELOG: &[Release] = &[
+    (
+        "0.0.2",
+        "2026-11-19",
+        "Ingress agent biocards",
+        &[
+            ("new", "Ingress Biocard templates under Playing & game cards, in Enlightened green and Resistance blue: trading-card size (2.5 × 3.5 in) with your codename, faction, level badge, a photo to replace (Image › Replace…), a few stats and a QR code to your Telegram; the back carries a faction ring. Only the faction names and colours are used — no game logos — so the cards are yours to print."),
+        ],
+    ),
+    (
     "0.0.1",
     "2026-11-19",
     "CardBuilder — first release",
@@ -21,4 +35,5 @@ pub const CHANGELOG: &[Release] = &[(
         ("new", "Design files: New, Open and Save (.cb files, pictures and data included); unsaved changes are never thrown away without asking, and everything can be undone."),
         ("new", "31 themes with CardBuilder's own Card Studio, a custom title bar, and the CardBuilder logo."),
     ],
-)];
+),
+];

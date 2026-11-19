@@ -18,8 +18,8 @@ bleed, crop marks and the backs lined up for double-sided printing.
 
 ## Features
 
-- **Every kind of card:** 37 ready-made sizes (business cards for Europe, the US, Asia, Japan and
-  Australia; CR80 ID, badge and gift cards; poker, bridge, trading, tarot and mini game cards; A6,
+- **Every kind of card:** 39 ready-made sizes (business cards for Europe, the US, Asia, Japan and
+  Australia; CR80 ID, badge and gift cards; poker, bridge, trading, tarot and mini game cards and Ingress agent biocards (Enlightened and Resistance); A6,
   4×6, 5×7, A5 and DL postcards; A6, A5, 5×7, square and DL greeting cards; place cards and table
   tents; bookmarks, hang tags and labels) or any custom size — flat, side-folded or top-folded,
   with rounded corners.

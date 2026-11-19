@@ -61,7 +61,7 @@ fn app_renders_and_responds() {
 #[ignore = "needs a GPU; run with --ignored"]
 fn every_kind_of_card() {
     let mut h = harness(1440.0, 900.0);
-    for (i, id) in ["greet-a6", "game-poker", "tent-place", "id-badge"].into_iter().enumerate() {
+    for (i, id) in ["greet-a6", "game-poker", "tent-place", "id-badge", "game-biocard-res"].into_iter().enumerate() {
         open_preset(&mut h, id);
         settle(&mut h);
         save(&mut h, &format!("1{i}-{id}"));

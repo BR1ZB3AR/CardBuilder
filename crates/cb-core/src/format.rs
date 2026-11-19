@@ -112,6 +112,8 @@ pub const PRESETS: &[Preset] = &[
     p("game-tarot", Game, "Tarot", "70 × 120 mm", 70.0, 120.0, 4.0, Fold::None),
     p("game-mini", Game, "Mini", "44 × 63 mm · board-game cards", 44.0, 63.0, 3.0, Fold::None),
     p("game-square", Game, "Square", "70 × 70 mm", 70.0, 70.0, 3.0, Fold::None),
+    p("game-biocard-enl", Game, "Ingress Biocard (ENL)", "2.5 × 3.5 in · Enlightened agent card", 63.5, 88.9, 3.0, Fold::None),
+    p("game-biocard-res", Game, "Ingress Biocard (RES)", "2.5 × 3.5 in · Resistance agent card", 63.5, 88.9, 3.0, Fold::None),
     p("post-a6", Postcard, "A6 postcard", "148 × 105 mm", 148.0, 105.0, 0.0, Fold::None),
     p("post-4x6", Postcard, "4 × 6 in postcard", "152 × 102 mm · US", 152.4, 101.6, 0.0, Fold::None),
     p("post-5x7", Postcard, "5 × 7 in invitation", "127 × 178 mm · weddings, parties", 127.0, 177.8, 0.0, Fold::None),
