@@ -365,6 +365,15 @@ impl Canvas for PdfCanvas<'_> {
         let _ = write!(self.out, "{} RG {} w 1 J 1 j\n{}S\nQ\n", rg(&c), num(width as f64 * ((sx + sy) / 2.0) as f64), path_ops(path, ts));
     }
 
+    fn stroke_dashed(&mut self, path: &Path, paint: &Paint, width: f32, dash: [f32; 2], ts: Transform) {
+        // the dash pattern in page units, like the line width
+        let (sx, sy) = ts_scale(&ts);
+        let k = ((sx + sy) / 2.0) as f64;
+        let _ = writeln!(self.out, "q [{} {}] 0 d", num(dash[0] as f64 * k), num(dash[1] as f64 * k));
+        self.stroke(path, paint, width, ts);
+        self.out.push_str("Q\n");
+    }
+
     fn image(&mut self, img: &Decoded, key: u64, ts: Transform, opacity: f32) {
         if opacity <= 0.001 {
             return;
@@ -395,8 +404,9 @@ impl Canvas for PdfCanvas<'_> {
         self.out.push_str("Q\n");
     }
 
-    fn push_clip(&mut self, path: &Path, ts: Transform) {
-        let _ = write!(self.out, "q\n{}W n\n", path_ops(path, ts));
+    fn push_clip(&mut self, path: &Path, ts: Transform, rule: FillRule) {
+        let w = if rule == FillRule::EvenOdd { "W*" } else { "W" };
+        let _ = write!(self.out, "q\n{}{w} n\n", path_ops(path, ts));
     }
 
     fn pop_clip(&mut self) {

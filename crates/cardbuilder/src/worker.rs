@@ -1,10 +1,15 @@
 //! Background rendering, so editing never waits for pixels: one thread draws the side shown in
 //! the editor (at the zoom it is shown at), another the textures of the 3D card (both sides and
 //! the foil / spot UV masks). Each keeps only the newest job.
+//!
+//! The web version has no threads: a job runs in the frame that asks for its result, and the 3D
+//! textures wait for a pause in the editing, so typing stays quick.
 
 use cb_core::doc::{Doc, Side};
 use cb_print::{render_finish_mask, render_side, DrawOptions, ImageCache};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Condvar, Mutex};
 
 /// the editor's images of both sides (premultiplied RGBA of each bleed box)
 pub struct Preview {
@@ -27,48 +32,98 @@ pub struct Textures {
     pub sides: [SideTex; 2],
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct Slot<J, D> {
     job: Mutex<Option<J>>,
     wake: Condvar,
     done: Mutex<Option<D>>,
 }
 
-fn spawn<J: Send + 'static, D: Send + 'static>(name: &str, ctx: egui::Context, work: impl Fn(J, &mut ImageCache) -> Option<D> + Send + 'static) -> Arc<Slot<J, D>> {
-    let slot = Arc::new(Slot { job: Mutex::new(None), wake: Condvar::new(), done: Mutex::new(None) });
-    let s = slot.clone();
-    std::thread::Builder::new()
-        .name(name.into())
-        .spawn(move || {
-            let mut imgs = ImageCache::default();
-            loop {
-                let job = {
-                    let mut j = s.job.lock().unwrap();
-                    while j.is_none() {
-                        j = s.wake.wait(j).unwrap();
-                    }
-                    j.take().unwrap()
-                };
-                if let Some(d) = work(job, &mut imgs) {
-                    *s.done.lock().unwrap() = Some(d);
-                    ctx.request_repaint();
-                }
-            }
-        })
-        .expect("render thread");
-    slot
+/// one worker that keeps only the newest job: a thread, or in the browser the frame itself
+#[cfg(not(target_arch = "wasm32"))]
+struct Lane<J, D> {
+    slot: Arc<Slot<J, D>>,
 }
 
-fn submit<J, D>(slot: &Slot<J, D>, job: J) {
-    *slot.job.lock().unwrap() = Some(job);
-    slot.wake.notify_one();
+#[cfg(not(target_arch = "wasm32"))]
+impl<J: Send + 'static, D: Send + 'static> Lane<J, D> {
+    /// `settle` only matters in the browser (see there)
+    fn new(name: &str, ctx: egui::Context, _settle: f64, work: impl Fn(J, &mut ImageCache) -> Option<D> + Send + 'static) -> Lane<J, D> {
+        let slot = Arc::new(Slot { job: Mutex::new(None), wake: Condvar::new(), done: Mutex::new(None) });
+        let s = slot.clone();
+        std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                let mut imgs = ImageCache::default();
+                loop {
+                    let job = {
+                        let mut j = s.job.lock().unwrap();
+                        while j.is_none() {
+                            j = s.wake.wait(j).unwrap();
+                        }
+                        j.take().unwrap()
+                    };
+                    if let Some(d) = work(job, &mut imgs) {
+                        *s.done.lock().unwrap() = Some(d);
+                        ctx.request_repaint();
+                    }
+                }
+            })
+            .expect("render thread");
+        Lane { slot }
+    }
+
+    fn submit(&mut self, job: J) {
+        *self.slot.job.lock().unwrap() = Some(job);
+        self.slot.wake.notify_one();
+    }
+
+    fn take(&mut self) -> Option<D> {
+        self.slot.done.lock().unwrap().take()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct Lane<J, D> {
+    job: Option<J>,
+    work: Box<dyn Fn(J, &mut ImageCache) -> Option<D>>,
+    imgs: ImageCache,
+    ctx: egui::Context,
+    /// seconds a job waits for a newer one before it runs (a pause in the editing)
+    settle: f64,
+    since: f64,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<J, D> Lane<J, D> {
+    fn new(_name: &str, ctx: egui::Context, settle: f64, work: impl Fn(J, &mut ImageCache) -> Option<D> + 'static) -> Lane<J, D> {
+        Lane { job: None, work: Box::new(work), imgs: ImageCache::default(), ctx, settle, since: 0.0 }
+    }
+
+    fn submit(&mut self, job: J) {
+        self.job = Some(job);
+        self.since = self.ctx.input(|i| i.time);
+    }
+
+    /// run the waiting job once it has settled
+    fn take(&mut self) -> Option<D> {
+        self.job.as_ref()?;
+        let waited = self.ctx.input(|i| i.time) - self.since;
+        if waited < self.settle {
+            self.ctx.request_repaint_after(std::time::Duration::from_secs_f64(self.settle - waited));
+            return None;
+        }
+        let job = self.job.take()?;
+        (self.work)(job, &mut self.imgs)
+    }
 }
 
 type PreviewJob = (Arc<Doc>, Option<usize>, f64);
 type TexJob = (Arc<Doc>, Option<usize>);
 
 pub struct Renderer {
-    preview: Arc<Slot<PreviewJob, Preview>>,
-    textures: Arc<Slot<TexJob, Textures>>,
+    preview: Lane<PreviewJob, Preview>,
+    textures: Lane<TexJob, Textures>,
     /// the design the jobs were made from (shared, so a frame without changes costs one compare)
     doc: Option<Arc<Doc>>,
     preview_key: Option<(Option<usize>, u64)>,
@@ -81,15 +136,18 @@ fn prepare(imgs: &mut ImageCache, doc: &Doc) {
     imgs.retain(cb_print::image_srcs(doc));
 }
 
-/// 3D texture resolution: 10 px per mm, at most 4096 px across
-fn tex_ppm(doc: &Doc) -> f64 {
+/// 3D texture resolution: 24 px per mm (about 600 dpi, sharp when zoomed in close), at most
+/// 8192 px across (egui's device always allows that) and 16 million pixels a side. The web
+/// version draws them in the frame, so it settles for 12 px per mm and 4 million pixels.
+pub fn tex_ppm(doc: &Doc) -> f64 {
     let (sw, sh) = doc.format.sheet();
-    (4096.0 / sw.max(sh)).min(10.0)
+    let (ppm, budget) = if cfg!(target_arch = "wasm32") { (12.0, 4.0e6) } else { (24.0, 16.0e6) };
+    f64::min(ppm, 8192.0 / sw.max(sh)).min((budget / (sw * sh)).sqrt())
 }
 
 impl Renderer {
     pub fn new(ctx: &egui::Context) -> Renderer {
-        let preview = spawn("card-preview", ctx.clone(), |(doc, record, ppm): PreviewJob, imgs| {
+        let preview = Lane::new("card-preview", ctx.clone(), 0.0, |(doc, record, ppm): PreviewJob, imgs| {
             prepare(imgs, &doc);
             let side = |s: Side| -> Option<(u32, u32, Vec<u8>)> {
                 let pm = render_side(&doc, s, &DrawOptions::preview(record), ppm, true, imgs)?;
@@ -97,7 +155,7 @@ impl Renderer {
             };
             Some(Preview { sides: [side(Side::Front)?, side(Side::Back)?] })
         });
-        let textures = spawn("card-3d-textures", ctx.clone(), |(doc, record): TexJob, imgs| {
+        let textures = Lane::new("card-3d-textures", ctx.clone(), 0.35, |(doc, record): TexJob, imgs| {
             prepare(imgs, &doc);
             let ppm = tex_ppm(&doc);
             let finishes = doc.has_finishes();
@@ -125,7 +183,7 @@ impl Renderer {
         if !same_doc || self.tex_key != Some(record) {
             self.tex_doc = Some(d.clone());
             self.tex_key = Some(record);
-            submit(&self.textures, (d, record));
+            self.textures.submit((d, record));
         }
     }
 
@@ -135,16 +193,16 @@ impl Renderer {
         let key = (record, Arc::as_ptr(&d) as u64 ^ (ppm.to_bits().rotate_left(17)));
         if self.preview_key != Some(key) {
             self.preview_key = Some(key);
-            submit(&self.preview, (d, record, ppm));
+            self.preview.submit((d, record, ppm));
         }
     }
 
     pub fn take_preview(&mut self) -> Option<Preview> {
-        self.preview.done.lock().unwrap().take()
+        self.preview.take()
     }
 
     pub fn take_textures(&mut self) -> Option<Textures> {
-        self.textures.done.lock().unwrap().take()
+        self.textures.take()
     }
 }
 

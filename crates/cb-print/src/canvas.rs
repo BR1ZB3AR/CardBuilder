@@ -25,10 +25,12 @@ impl Paint {
 pub trait Canvas {
     fn fill(&mut self, path: &Path, paint: &Paint, ts: Transform, rule: FillRule);
     fn stroke(&mut self, path: &Path, paint: &Paint, width: f32, ts: Transform);
+    /// a dashed or dotted line: `dash` = on and off lengths in the path's units
+    fn stroke_dashed(&mut self, path: &Path, paint: &Paint, width: f32, dash: [f32; 2], ts: Transform);
     /// draw an image so that the unit square (0,0)–(1,1) — (0,0) its top-left corner — lands where `ts` puts it
     fn image(&mut self, img: &Decoded, key: u64, ts: Transform, opacity: f32);
     /// limit drawing to the inside of `path` until the matching `pop_clip`
-    fn push_clip(&mut self, path: &Path, ts: Transform);
+    fn push_clip(&mut self, path: &Path, ts: Transform, rule: FillRule);
     fn pop_clip(&mut self);
 }
 
@@ -79,6 +81,19 @@ impl Canvas for SkiaCanvas {
         self.pixmap.stroke_path(path, &p, &stroke, t, self.clips.last());
     }
 
+    fn stroke_dashed(&mut self, path: &Path, paint: &Paint, width: f32, dash: [f32; 2], ts: Transform) {
+        let p = self.skia_paint(paint);
+        let t = self.base.pre_concat(ts);
+        let stroke = tiny_skia::Stroke {
+            width,
+            line_join: tiny_skia::LineJoin::Round,
+            line_cap: tiny_skia::LineCap::Round,
+            dash: tiny_skia::StrokeDash::new(dash.to_vec(), 0.0),
+            ..Default::default()
+        };
+        self.pixmap.stroke_path(path, &p, &stroke, t, self.clips.last());
+    }
+
     fn image(&mut self, img: &Decoded, _key: u64, ts: Transform, opacity: f32) {
         let t = self.base.pre_concat(ts);
         let raster;
@@ -106,17 +121,17 @@ impl Canvas for SkiaCanvas {
         }
     }
 
-    fn push_clip(&mut self, path: &Path, ts: Transform) {
+    fn push_clip(&mut self, path: &Path, ts: Transform, rule: FillRule) {
         let t = self.base.pre_concat(ts);
         let mask = match self.clips.last() {
             Some(m) => {
                 let mut m = m.clone();
-                m.intersect_path(path, FillRule::Winding, true, t);
+                m.intersect_path(path, rule, true, t);
                 m
             }
             None => {
                 let mut m = Mask::new(self.pixmap.width(), self.pixmap.height()).expect("pixmap size");
-                m.fill_path(path, FillRule::Winding, true, t);
+                m.fill_path(path, rule, true, t);
                 m
             }
         };

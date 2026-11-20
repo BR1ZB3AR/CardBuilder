@@ -96,23 +96,90 @@ pub fn draw_side(c: &mut dyn Canvas, doc: &Doc, side: Side, o: &DrawOptions, img
     let (sw, sh) = f.sheet();
     let b = f.bleed;
     let Some(bleed_box) = rect_path(-b, -b, sw + 2.0 * b, sh + 2.0 * b) else { return };
-    c.push_clip(&bleed_box, base);
+    c.push_clip(&bleed_box, base, FillRule::Winding);
     if o.mode == Mode::Color {
         draw_background(c, doc, side, o, imgs, base, &bleed_box);
     }
     let fill = doc.filler(o.record);
-    for l in doc.layers_on(side).filter(|l| l.visible && l.opacity > 0.0) {
+    // the layer that clipped layers above it show through (the nearest one below that isn't clipped)
+    let mut under: Option<&Layer> = None;
+    for l in doc.layers_on(side) {
+        if !l.clip {
+            under = Some(l);
+        }
         let wanted = match o.mode {
             Mode::Color => true,
             Mode::Foil => l.foil.is_some(),
             Mode::Uv => l.spot_uv,
             Mode::Holo => l.foil == Some(Foil::Holo),
         };
-        if wanted {
-            draw_layer(c, l, o, imgs, base, &fill);
+        if !wanted || !l.visible || l.opacity <= 0.0 {
+            continue;
+        }
+        match under.filter(|u| l.clip && u.id != l.id) {
+            // hidden along with the layer it shows through
+            Some(u) if !u.visible => {}
+            Some(u) => {
+                if let Some((p, rule)) = clip_area(u, &fill) {
+                    c.push_clip(&p, layer_ts(u, base), rule);
+                    draw_layer(c, l, o, imgs, base, &fill);
+                    c.pop_clip();
+                }
+            }
+            None => draw_layer(c, l, o, imgs, base, &fill),
         }
     }
     c.pop_clip();
+}
+
+/// where a layer clipped to `u` may show: a shape's inside, otherwise `u`'s box (layer space)
+fn clip_area(u: &Layer, fill: &dyn Fn(&str) -> String) -> Option<(Path, FillRule)> {
+    if u.kind == LayerType::Shape && u.shape != Some(ShapeKind::Line) {
+        let rule = if u.shape == Some(ShapeKind::Path) { crate::vector::fill_rule(u) } else { FillRule::Winding };
+        return shape_path(u).map(|p| (p, rule));
+    }
+    let (w, h) = if u.shape == Some(ShapeKind::Line) { (u.w, u.stroke_w.unwrap_or(0.5)) } else { layer_size(u, fill) };
+    rect_path(-w / 2.0, -h / 2.0, w, h).map(|p| (p, FillRule::Winding))
+}
+
+/// a shape layer's outline in its own box (mm, centred on the layer)
+pub fn shape_path(l: &Layer) -> Option<Path> {
+    match l.shape.unwrap_or(ShapeKind::Rect) {
+        ShapeKind::Rect => rounded_rect_path(l.w as f32, l.h as f32, l.radius.unwrap_or(0.0) as f32),
+        ShapeKind::Ellipse => Rect::from_xywh((-l.w / 2.0) as f32, (-l.h / 2.0) as f32, l.w as f32, l.h as f32).and_then(PathBuilder::from_oval),
+        ShapeKind::Line => {
+            let mut pb = PathBuilder::new();
+            pb.move_to((-l.w / 2.0) as f32, 0.0);
+            pb.line_to((l.w / 2.0) as f32, 0.0);
+            pb.finish()
+        }
+        ShapeKind::Path => crate::vector::layer_path(l),
+    }
+}
+
+/// Whether a click at (`x`, `y`) (mm on the side) lands on layer `l`, give or take `tol` mm.
+/// Vector shapes, and shapes that are only an outline, count only where they are painted (so
+/// artwork with holes and gaps — a frame, a pattern of lines, a dotted box — lets clicks through
+/// to the layers below); everything else by its box.
+pub fn layer_hit(l: &Layer, x: f64, y: f64, tol: f64, fill: &dyn Fn(&str) -> String) -> bool {
+    // the point in the layer's own box (centred, unrotated)
+    let (s, c) = (-l.rot).to_radians().sin_cos();
+    let (dx, dy) = (x - l.x, y - l.y);
+    let (lx, ly) = (dx * c - dy * s, dx * s + dy * c);
+    let (w, h) = layer_size(l, fill);
+    let outline = l.stroke.as_ref().and(l.stroke_w).filter(|w| *w > 0.0);
+    let pad = tol + outline.unwrap_or(0.0) / 2.0;
+    if lx.abs() > w / 2.0 + pad || ly.abs() > h / 2.0 + pad {
+        return false;
+    }
+    let shape = l.shape.unwrap_or(ShapeKind::Rect);
+    let precise = l.kind == LayerType::Shape && (shape == ShapeKind::Path || (shape != ShapeKind::Line && l.fill.is_none()));
+    if !precise {
+        return true;
+    }
+    let Some(p) = shape_path(l) else { return false };
+    let rule = if shape == ShapeKind::Path { crate::vector::fill_rule(l) } else { FillRule::Winding };
+    crate::vector::paints(&p, rule, l.fill.is_some(), outline, lx, ly, tol)
 }
 
 fn draw_background(c: &mut dyn Canvas, doc: &Doc, side: Side, o: &DrawOptions, imgs: &ImageCache, base: Transform, bleed_box: &Path) {
@@ -223,28 +290,30 @@ pub fn draw_layer(c: &mut dyn Canvas, l: &Layer, o: &DrawOptions, imgs: &ImageCa
         }
         LayerType::Shape => {
             let shape = l.shape.unwrap_or(ShapeKind::Rect);
-            let path = match shape {
-                ShapeKind::Rect => rounded_rect_path(l.w as f32, l.h as f32, l.radius.unwrap_or(0.0) as f32),
-                ShapeKind::Ellipse => Rect::from_xywh((-l.w / 2.0) as f32, (-l.h / 2.0) as f32, l.w as f32, l.h as f32).and_then(PathBuilder::from_oval),
-                ShapeKind::Line => {
-                    let mut pb = PathBuilder::new();
-                    pb.move_to((-l.w / 2.0) as f32, 0.0);
-                    pb.line_to((l.w / 2.0) as f32, 0.0);
-                    pb.finish()
+            let Some(path) = shape_path(l) else { return };
+            // an outline, solid or dashed or dotted (dash lengths in mm, like the width)
+            let outline = |c: &mut dyn Canvas, col: &str, sw: f64| {
+                let paint = ink(l, o, col, l.w, l.h);
+                match l.dash {
+                    Some(d) => {
+                        let [on, off] = d.intervals(sw);
+                        c.stroke_dashed(&path, &paint, sw as f32, [on as f32, off as f32], ts);
+                    }
+                    None => c.stroke(&path, &paint, sw as f32, ts),
                 }
             };
-            let Some(path) = path else { return };
             if shape == ShapeKind::Line {
                 let col = l.stroke.as_deref().or(l.fill.as_deref()).unwrap_or("#000000");
-                c.stroke(&path, &ink(l, o, col, l.w, l.h), l.stroke_w.unwrap_or(0.5).max(0.05) as f32, ts);
+                outline(c, col, l.stroke_w.unwrap_or(0.5).max(0.05));
                 return;
             }
             if let Some(fc) = l.fill.as_deref() {
-                c.fill(&path, &ink(l, o, fc, l.w, l.h), ts, FillRule::Winding);
+                let rule = if shape == ShapeKind::Path { crate::vector::fill_rule(l) } else { FillRule::Winding };
+                c.fill(&path, &ink(l, o, fc, l.w, l.h), ts, rule);
             }
             if let (Some(sc), Some(sw)) = (l.stroke.as_deref(), l.stroke_w) {
                 if sw > 0.0 {
-                    c.stroke(&path, &ink(l, o, sc, l.w, l.h), sw as f32, ts);
+                    outline(c, sc, sw);
                 }
             }
         }

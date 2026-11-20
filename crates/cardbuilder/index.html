@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- The web version of CardBuilder: `trunk build --release --public-url ./` in this folder
+     builds it into dist/ (GitHub Pages and Codeberg Pages serve that). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="CardBuilder — design business cards, greeting cards, game cards and more, with a live 3D preview. Runs in your browser." />
+    <title>CardBuilder</title>
+    <link data-trunk rel="rust" data-bin="cardbuilder" data-wasm-opt="s" />
+    <link data-trunk rel="icon" href="assets/icon-256.png" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #11132b; overflow: hidden; }
+      #cardbuilder_canvas { width: 100%; height: 100%; display: block; outline: none; }
+      #loading {
+        position: fixed; inset: 0; display: grid; place-items: center; text-align: center;
+        color: #8d92c2; font: 14px system-ui, sans-serif; padding: 24px;
+      }
+      #loading p { max-width: 36em; line-height: 1.5; }
+      #loading b { color: #e6e8ff; font-size: 16px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="cardbuilder_canvas"></canvas>
+    <div id="loading"><p><b>CardBuilder</b><br />Loading the card designer…</p></div>
+  </body>
+</html>

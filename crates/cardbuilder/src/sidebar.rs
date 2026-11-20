@@ -4,7 +4,7 @@
 use crate::app::{kind_label, CardBuilderApp, Tab};
 use crate::style::{icon, icons, semibold, P};
 use crate::widgets::{big_button, button, hex_color, hint, section, seg, slider_row, swatch, to_hex, toggle_row, BtnKind};
-use cb_core::doc::{Align, Backdrop, BgMode, Foil, Layer, LayerType, QrEcc, QrKind, ShapeKind, Stock, VAlign};
+use cb_core::doc::{Align, Backdrop, BgMode, Dash, Foil, Layer, LayerType, QrEcc, QrKind, ShapeKind, Stock, VAlign};
 use cb_core::Fold;
 use egui::{vec2, Align as EAlign, Align2, Color32, CornerRadius, FontFamily, FontId, Layout, RichText, Sense, Stroke, StrokeKind, Ui};
 use lucide_icons::Icon;
@@ -77,6 +77,7 @@ fn layer_icon(l: &Layer) -> Icon {
             ShapeKind::Rect => Icon::Square,
             ShapeKind::Ellipse => Icon::Circle,
             ShapeKind::Line => Icon::Minus,
+            ShapeKind::Path => Icon::PenTool,
         },
     }
 }
@@ -222,10 +223,15 @@ impl CardBuilderApp {
                     ui.painter().rect_filled(r, CornerRadius::same(7), if on { P.accent_weak } else { P.panel2 });
                 }
                 let fg = if !l.visible { P.muted.gamma_multiply(0.6) } else { P.text };
-                ui.painter().text(r.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, icon(layer_icon(l)), FontId::new(14.0, icons()), if on { P.accent } else { P.muted });
+                // a layer that shows through the one below it sits indented under it
+                let indent = if l.clip { 14.0 } else { 0.0 };
+                if l.clip {
+                    ui.painter().text(r.left_center() + vec2(9.0, 0.0), Align2::LEFT_CENTER, icon(Icon::CornerDownRight), FontId::new(11.0, icons()), P.muted);
+                }
+                ui.painter().text(r.left_center() + vec2(10.0 + indent, 0.0), Align2::LEFT_CENTER, icon(layer_icon(l)), FontId::new(14.0, icons()), if on { P.accent } else { P.muted });
                 let g = ui.painter().layout_no_wrap(name.clone(), FontId::proportional(12.5), fg);
                 let clip = egui::Rect::from_min_max(r.min, egui::pos2(r.right() - 74.0, r.bottom()));
-                ui.painter().with_clip_rect(clip).galley(egui::pos2(r.left() + 32.0, r.center().y - g.size().y / 2.0), g, fg);
+                ui.painter().with_clip_rect(clip).galley(egui::pos2(r.left() + 32.0 + indent, r.center().y - g.size().y / 2.0), g, fg);
                 if l.foil.is_some() || l.spot_uv {
                     ui.painter().text(r.right_center() - vec2(62.0, 0.0), Align2::CENTER_CENTER, icon(Icon::Sparkles), FontId::new(11.0, icons()), P.accent);
                 }
@@ -350,7 +356,7 @@ impl CardBuilderApp {
                         });
                     });
                     if add_font {
-                        if let Some(fam) = self.add_font_file(now) {
+                        if let Some(fam) = self.add_font_file(now, &l.id) {
                             n.font = Some(fam);
                         }
                     }
@@ -509,9 +515,11 @@ impl CardBuilderApp {
                 });
             }
             LayerType::Shape => {
-                section(ui, "Shape", None, None, |ui| {
+                let vector = n.shape == Some(ShapeKind::Path);
+                let sub = if vector { Some("Artwork drawn as an outline: sharp at any size, in any colour") } else { None };
+                section(ui, if vector { "Vector shape" } else { "Shape" }, sub, None, |ui| {
                     let mut k = n.shape.unwrap_or_default();
-                    if seg(ui, &mut k, &[(ShapeKind::Rect, "Rectangle"), (ShapeKind::Ellipse, "Ellipse"), (ShapeKind::Line, "Line")], true) {
+                    if !vector && seg(ui, &mut k, &[(ShapeKind::Rect, "Rectangle"), (ShapeKind::Ellipse, "Ellipse"), (ShapeKind::Line, "Line")], true) {
                         n.shape = Some(k);
                         if k == ShapeKind::Line {
                             n.stroke = n.stroke.clone().or(n.fill.clone()).or(Some("#1f2347".into()));
@@ -549,6 +557,20 @@ impl CardBuilderApp {
                         let mut sc = n.stroke.clone().unwrap_or_else(|| "#1f2347".into());
                         if color_row(ui, if k == ShapeKind::Line { "Colour" } else { "Outline colour" }, &mut sc) {
                             n.stroke = Some(sc);
+                        }
+                        let mut dash = n.dash;
+                        ui.horizontal(|ui| {
+                            ui.label(if k == ShapeKind::Line { "Style" } else { "Outline style" });
+                            ui.with_layout(Layout::right_to_left(EAlign::Center), |ui| {
+                                if seg(ui, &mut dash, &[(Some(Dash::Dotted), "Dotted"), (Some(Dash::Dashed), "Dashed"), (None, "Solid")], true) {
+                                    n.dash = dash;
+                                }
+                            });
+                        });
+                    }
+                    if let Some(pw) = n.path.as_ref().filter(|p| p.w > 0.0 && p.h > 0.0).map(|p| p.h / p.w) {
+                        if ui.small_button("Original proportions").on_hover_text("Undo any stretching: the height follows the width").clicked() {
+                            n.h = n.w * pw;
                         }
                     }
                     if k == ShapeKind::Rect {
@@ -592,6 +614,13 @@ impl CardBuilderApp {
             let mut op = n.opacity;
             if slider_row(ui, "Opacity", &mut op, 0.0..=1.0, 0.01, |v| format!("{:.0}%", v * 100.0), true) {
                 n.opacity = op;
+            }
+            let mut clip = n.clip;
+            if toggle_row(ui, "Clip to the layer below", &mut clip) {
+                n.clip = clip;
+            }
+            if n.clip {
+                hint(ui, "Shows only inside the layer under it — a photo in a window shape. Replace the picture and it stays in the window.");
             }
             ui.add_space(4.0);
             let p = self.panel_at(l.x, l.y);
@@ -797,7 +826,7 @@ impl CardBuilderApp {
             }
         });
         if pick {
-            if let Some(src) = self.choose_picture(now) {
+            if let Some(src) = self.choose_picture(now, side) {
                 bg.src = Some(src);
             }
         }
@@ -1005,26 +1034,25 @@ impl CardBuilderApp {
     }
 
     /// Add a font file (.ttf / .otf) to the design: it travels inside the .cb file. Returns the
-    /// family name to use.
-    pub(crate) fn add_font_file(&mut self, now: f64) -> Option<String> {
+    /// family name to use (the web version sets it on text layer `layer` itself, once the
+    /// browser has the file).
+    pub(crate) fn add_font_file(&mut self, now: f64, layer: &str) -> Option<String> {
+        let (name, bytes) = self.pick_file(crate::pick::PickFor::Font(layer.to_string()), "Add a font", "Font", &["ttf", "otf"], now)?;
+        self.add_font_bytes(&name, &bytes, now)
+    }
+
+    /// add the font in `bytes` (from the file `name`) to the design; its family name
+    pub(crate) fn add_font_bytes(&mut self, name: &str, bytes: &[u8], now: f64) -> Option<String> {
         use base64::Engine as _;
-        let path = rfd::FileDialog::new().add_filter("Font", &["ttf", "otf"]).set_title("Add a font").pick_file()?;
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => {
-                self.say(format!("Couldn't read the font: {e}"), now);
-                return None;
-            }
-        };
-        let Some(mut family) = cb_print::text::family_name(&bytes) else {
+        let Some(mut family) = cb_print::text::family_name(bytes) else {
             self.say("That isn't a font CardBuilder can use", now);
             return None;
         };
         if cb_print::text::is_bundled(&family) {
             family = format!("{family} (file)");
         }
-        let mime = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("otf")) { "font/otf" } else { "font/ttf" };
-        let src = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        let mime = if name.to_ascii_lowercase().ends_with(".otf") { "font/otf" } else { "font/ttf" };
+        let src = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
         let fam = family.clone();
         self.edit(now, None, |d| {
             d.fonts.retain(|f| f.family != fam);
@@ -1137,6 +1165,7 @@ impl CardBuilderApp {
 
     /// Scene › Graphics card: what draws the 3D, every card found, and the choice for next start
     fn gpu_section(&mut self, ui: &mut Ui, now: f64) {
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut restart = false;
         section(ui, "Graphics card", None, None, |ui| {
             let gpu = &mut self.gpu;
@@ -1175,48 +1204,57 @@ impl CardBuilderApp {
                 }
                 None => hint(ui, "This build draws without wgpu, so the graphics card can't be chosen."),
             }
-            let label = |c: &crate::gpu::GpuChoice| match c {
-                crate::gpu::GpuChoice::Auto => "Auto-detect (best card)".to_string(),
-                crate::gpu::GpuChoice::Adapter { name, backend } => format!("{name} · {backend}"),
-            };
-            let mut choice = gpu.choice.clone();
-            ui.horizontal(|ui| {
-                let lbl = ui.label("Use");
-                ui.with_layout(Layout::right_to_left(EAlign::Center), |ui| {
-                    egui::ComboBox::new("gpu-choice", "")
-                        .selected_text(label(&choice))
-                        .width(210.0)
-                        .truncate()
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut choice, crate::gpu::GpuChoice::Auto, label(&crate::gpu::GpuChoice::Auto));
-                            for g in &gpu.all {
-                                let text = format!("{} · {}{}", g.name, g.backend, if g.software() { " (CPU)" } else { "" });
-                                ui.selectable_value(&mut choice, g.key(), text);
-                            }
-                        })
-                        .response
-                        .labelled_by(lbl.id);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let label = |c: &crate::gpu::GpuChoice| match c {
+                    crate::gpu::GpuChoice::Auto => "Auto-detect (best card)".to_string(),
+                    crate::gpu::GpuChoice::Adapter { name, backend } => format!("{name} · {backend}"),
+                };
+                let mut choice = gpu.choice.clone();
+                ui.horizontal(|ui| {
+                    let lbl = ui.label("Use");
+                    ui.with_layout(Layout::right_to_left(EAlign::Center), |ui| {
+                        egui::ComboBox::new("gpu-choice", "")
+                            .selected_text(label(&choice))
+                            .width(210.0)
+                            .truncate()
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut choice, crate::gpu::GpuChoice::Auto, label(&crate::gpu::GpuChoice::Auto));
+                                for g in &gpu.all {
+                                    let text = format!("{} · {}{}", g.name, g.backend, if g.software() { " (CPU)" } else { "" });
+                                    ui.selectable_value(&mut choice, g.key(), text);
+                                }
+                            })
+                            .response
+                            .labelled_by(lbl.id);
+                    });
                 });
-            });
-            if choice != gpu.choice {
-                match crate::gpu::save_choice(&choice) {
-                    Ok(()) => gpu.choice = choice,
-                    Err(e) => self.status = Some((format!("Couldn't save the graphics card choice: {e}"), now)),
+                if choice != gpu.choice {
+                    match crate::gpu::save_choice(&choice) {
+                        Ok(()) => gpu.choice = choice,
+                        Err(e) => self.status = Some((format!("Couldn't save the graphics card choice: {e}"), now)),
+                    }
+                }
+                let gpu = &self.gpu;
+                if gpu.choice != gpu.started_with {
+                    hint(ui, "The new choice takes effect when CardBuilder restarts.");
+                    if ui.add_sized([ui.available_width(), 30.0], egui::Button::new("Restart CardBuilder now")).clicked() {
+                        restart = true;
+                    }
                 }
             }
-            let gpu = &self.gpu;
-            if gpu.choice != gpu.started_with {
-                hint(ui, "The new choice takes effect when CardBuilder restarts.");
-                if ui.add_sized([ui.available_width(), 30.0], egui::Button::new("Restart CardBuilder now")).clicked() {
-                    restart = true;
-                }
-            }
+            // in the browser, the browser chooses the graphics card
+            #[cfg(target_arch = "wasm32")]
+            hint(ui, "In the browser, the browser decides which graphics card draws CardBuilder.");
         });
+        #[cfg(not(target_arch = "wasm32"))]
         if restart {
             match crate::gpu::relaunch() {
                 Ok(()) => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
                 Err(e) => self.say(format!("Couldn't restart: {e}"), now),
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = (restart, now);
     }
 }

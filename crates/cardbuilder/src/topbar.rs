@@ -301,7 +301,8 @@ impl CardBuilderApp {
             if menu_row(ui, Icon::Save, "Save as…", ".cb — this app's design file (Ctrl+Shift+S)", false, true) {
                 save_as = true;
             }
-            if menu_row(ui, Icon::LayoutTemplate, "Save as template…", "shows in the card picker, on this computer", false, true) {
+            // templates live in a folder on the computer, which the browser can't keep
+            if cfg!(not(target_arch = "wasm32")) && menu_row(ui, Icon::LayoutTemplate, "Save as template…", "shows in the card picker, on this computer", false, true) {
                 save_template = true;
             }
             if has_data && menu_row(ui, Icon::FileSpreadsheet, "Data as CSV", "the card data, to edit in a spreadsheet", false, true) {

@@ -10,6 +10,7 @@ pub mod pdf;
 pub mod qr;
 pub mod sheets;
 pub mod text;
+pub mod vector;
 
 pub use draw::{draw_side, render_finish_mask, render_side, DrawOptions, Mode};
 pub use images::ImageCache;

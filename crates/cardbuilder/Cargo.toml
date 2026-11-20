@@ -1,6 +1,6 @@
 [package]
 name = "cardbuilder"
-version = "0.0.11"
+version = "0.0.14"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -23,8 +23,16 @@ log = "0.4"
 lucide-icons = "1.74.0"
 egui_extras = { version = "0.37.0", features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
-env_logger = "0.11"
 rfd = "0.18.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger = "0.11"
+
+# the web version (trunk build): files come and go through the browser
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "Document", "Window", "Element"] }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -10,6 +10,36 @@ pub type Release = (
 
 pub const CHANGELOG: &[Release] = &[
     (
+        "0.0.14",
+        "2026-11-20",
+        "CardBuilder in your browser",
+        &[
+            ("new", "CardBuilder runs in a web browser too, nothing to install: br1zb3ar.github.io/CardBuilder, or br1zb3ar.codeberg.page/CardBuilder on Codeberg. It's the same app. Saving and exports download to your downloads folder, Open and dropped files bring designs, pictures, spreadsheets and fonts in, and the design you're working on stays in the browser between visits."),
+        ],
+    ),
+    (
+        "0.0.13",
+        "2026-11-20",
+        "Sharper 3D and a view gizmo",
+        &[
+            ("new", "A view gizmo in the 3D preview's top right corner, with the X, Y and Z axes as CAD apps show them (Z up). Click an axis to look along it, and click it again to look from the other end. Drag the gizmo to turn the card. The house button below it goes back to the starting view."),
+            ("improved", "The card in 3D is much sharper: small text, thin lines and dotted patterns stay crisp instead of going soft. The print is drawn at about 600 dpi, so it holds up close too, and fine detail is sampled and sharpened like a photo, without halos round the card."),
+            ("fixed", "On screens scaled by a fraction (125 %, 150 %), the 3D picture could be stretched by a pixel and come out slightly blurred all over."),
+        ],
+    ),
+    (
+        "0.0.12",
+        "2026-11-20",
+        "Vector shapes, dotted outlines and photo windows",
+        &[
+            ("new", "Vector shapes: artwork of any outline — a frame, a logo, a pattern of lines or dots — as a layer you can recolour, outline, resize, move or delete, sharp at any size and printed as vectors in the PDF."),
+            ("new", "Outlines can be dotted or dashed (Shape › Outline style), with the dots kept round and evenly spaced however big the shape gets."),
+            ("new", "Clip to the layer below (Arrange): a layer shows only inside the shape under it, like a photo in a window. Replace the photo and the new one stays in the window."),
+            ("improved", "Vector shapes and outline-only shapes are picked where they are drawn, so a click through a frame's window or inside a dotted box reaches the layer underneath."),
+            ("fixed", "Clicking a layer could nudge it onto a nearby guide and mark the design as changed. A click now only selects; a layer moves once you drag it."),
+        ],
+    ),
+    (
         "0.0.11",
         "2026-11-19",
         "Named text layers",

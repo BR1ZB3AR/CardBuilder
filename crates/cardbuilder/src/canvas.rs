@@ -12,7 +12,7 @@ use crate::app::Tool;
 use crate::style::{semibold, P};
 use crate::worker::Renderer;
 use cb_core::doc::{Doc, Layer, LayerType, ShapeKind, Side};
-use cb_core::geom::{box_corners, from_local, point_in_box, to_local};
+use cb_core::geom::{box_corners, from_local, to_local};
 use egui::{pos2, vec2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 
 const SIDES: [Side; 2] = [Side::Front, Side::Back];
@@ -28,7 +28,8 @@ enum Grip {
 #[derive(Clone, Debug)]
 enum Drag {
     Pan { last: Pos2 },
-    Move { start: Layer, p0: (f64, f64) },
+    /// `moved`: the pointer has gone further than a click's wobble, so the layer follows it
+    Move { start: Layer, p0: (f64, f64), moved: bool },
     Grip { grip: Grip, start: Layer, p0: (f64, f64) },
 }
 
@@ -300,10 +301,8 @@ impl CanvasView {
         let hit = |p: Pos2, side: Side| -> Option<&Layer> {
             let (x, y) = xf.d(side, p);
             let tol = 3.0 / xf.scale as f64;
-            doc.layers_on(side).filter(|l| l.visible && !l.locked).collect::<Vec<_>>().into_iter().rev().find(|l| {
-                let (w, h) = Self::layer_box(l, &fill);
-                point_in_box(x, y, l.x, l.y, w + 2.0 * tol, h + 2.0 * tol, l.rot)
-            })
+            // vector artwork only where it's painted, so a click goes through its gaps
+            doc.layers_on(side).filter(|l| l.visible && !l.locked).collect::<Vec<_>>().into_iter().rev().find(|l| cb_print::draw::layer_hit(l, x, y, tol, &fill))
         };
         let placing = matches!(inp.tool, Tool::Text | Tool::Image | Tool::Shape | Tool::Qr);
         let side_under = ptr.and_then(|p| self.side_at(xf, doc, p));
@@ -333,7 +332,7 @@ impl CanvasView {
                         if l.side != inp.side {
                             ev.activate = Some(l.side);
                         }
-                        self.drag = Some(Drag::Move { start: l.clone(), p0: xf.d(l.side, p) });
+                        self.drag = Some(Drag::Move { start: l.clone(), p0: xf.d(l.side, p), moved: false });
                     } else {
                         if inp.selected.is_some() {
                             ev.select = Some(None);
@@ -368,18 +367,24 @@ impl CanvasView {
                     self.origin += p - last;
                     self.drag = Some(Drag::Pan { last: p });
                 }
-                Drag::Move { start, p0 } => {
+                Drag::Move { start, p0, moved } => {
                     let (x, y) = xf.d(start.side, p);
-                    let mut l = start.clone();
-                    l.x = start.x + (x - p0.0);
-                    l.y = start.y + (y - p0.1);
-                    if inp.snap && !alt {
-                        let (w, h) = Self::layer_box(&l, &fill);
-                        self.snap(&mut l, w, h, doc);
-                    }
-                    if (l.x - start.x).abs() > 1e-9 || (l.y - start.y).abs() > 1e-9 {
-                        let key = format!("move-{}", l.id);
-                        ev.set_layer = Some((l, key));
+                    // a click leaves the layer where it is (no snapping it onto a guide); it
+                    // follows the pointer once that has gone further than a click's wobble
+                    let moved = moved || (x - p0.0).hypot(y - p0.1) * xf.scale as f64 >= 3.0;
+                    if moved {
+                        self.drag = Some(Drag::Move { start: start.clone(), p0, moved });
+                        let mut l = start.clone();
+                        l.x = start.x + (x - p0.0);
+                        l.y = start.y + (y - p0.1);
+                        if inp.snap && !alt {
+                            let (w, h) = Self::layer_box(&l, &fill);
+                            self.snap(&mut l, w, h, doc);
+                        }
+                        if (l.x - start.x).abs() > 1e-9 || (l.y - start.y).abs() > 1e-9 {
+                            let key = format!("move-{}", l.id);
+                            ev.set_layer = Some((l, key));
+                        }
                     }
                 }
                 Drag::Grip { grip, start, p0 } => {

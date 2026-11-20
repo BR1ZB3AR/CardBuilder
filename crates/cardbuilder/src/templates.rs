@@ -5,7 +5,7 @@
 //! fonts that may not be shared never go into the app itself.
 
 use crate::app::CardBuilderApp;
-use cb_core::doc::{load_design, save_cb_template, template_info, TemplateInfo, CB_EXT};
+use cb_core::doc::{load_design, template_info, TemplateInfo, CB_EXT};
 use cb_core::format::{CardFormat, Category};
 use std::path::{Path, PathBuf};
 
@@ -28,12 +28,17 @@ impl LocalTemplate {
     }
 }
 
-/// where local templates live (`CB_TEMPLATE_DIR` overrides it, for tests)
+/// where local templates live (`CB_TEMPLATE_DIR` overrides it, for tests); none in the browser
 pub fn templates_dir() -> Option<PathBuf> {
-    if let Ok(d) = std::env::var("CB_TEMPLATE_DIR") {
-        return Some(PathBuf::from(d));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Ok(d) = std::env::var("CB_TEMPLATE_DIR") {
+            return Some(PathBuf::from(d));
+        }
+        eframe::storage_dir("cardbuilder").map(|d| d.join("templates"))
     }
-    eframe::storage_dir("cardbuilder").map(|d| d.join("templates"))
+    #[cfg(target_arch = "wasm32")]
+    None
 }
 
 /// every template in the folder, sorted by group and name
@@ -56,6 +61,7 @@ pub fn scan() -> Vec<LocalTemplate> {
 }
 
 /// a file-name-safe id from a name
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn slug(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -109,6 +115,14 @@ impl CardBuilderApp {
     /// Save as template…: the design goes into the templates folder and shows in the card picker
     /// (in the same group as the template or preset it came from, else under My templates).
     pub(crate) fn save_as_template(&mut self, now: f64) {
+        #[cfg(target_arch = "wasm32")]
+        return self.say("Templates are kept in a folder on the computer: save them from the desktop app", now);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.save_template_file(now);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_template_file(&mut self, now: f64) {
         let Some(dir) = templates_dir() else { return self.say("No folder for templates on this computer", now) };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return self.say(format!("Couldn't make the templates folder: {e}"), now);
@@ -127,7 +141,7 @@ impl CardBuilderApp {
             }
         };
         let info = TemplateInfo { id: format!("user-{}", slug(&name)), name: name.clone(), category, group, note: self.doc.format.size_label() };
-        let text = save_cb_template(&self.doc, &format!("CardBuilder {}", crate::app::VERSION), &info);
+        let text = cb_core::doc::save_cb_template(&self.doc, &format!("CardBuilder {}", crate::app::VERSION), &info);
         match std::fs::write(&path, text) {
             Ok(()) => {
                 self.rescan_templates();

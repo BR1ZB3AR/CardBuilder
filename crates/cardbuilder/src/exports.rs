@@ -1,6 +1,7 @@
 //! Exports (print sheets, card PDF, PNG pictures, 3D snapshot, data as CSV), the Print dialog,
 //! and bringing in pictures and spreadsheets. A save dialog first, then the file is made on a
-//! background thread while a toast shows the progress.
+//! background thread while a toast shows the progress. The web version makes the file at once
+//! and hands it to the browser as a download.
 
 use crate::app::{CardBuilderApp, Tool};
 use crate::style::{semibold, P};
@@ -10,7 +11,9 @@ use cb_core::doc::{Doc, Layer, LayerType, Side};
 use cb_core::format::{sheet_size, SHEETS};
 use cb_print::ImageCache;
 use egui::{pos2, vec2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, StrokeKind};
+use crate::pick::PickFor;
 use lucide_icons::Icon;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -76,14 +79,54 @@ pub fn image_data_url(name: &str, bytes: &[u8]) -> Result<(String, f64, f64), St
     Ok((format!("data:{};base64,{}", if jpeg { "image/jpeg" } else { "image/png" }, b64(&out.into_inner())), small.width() as f64, small.height() as f64))
 }
 
-/// offer `bytes` to the user in a save dialog; Some(path) when saved
-pub fn save_bytes(name: &str, bytes: &[u8], _mime: &str) -> Result<Option<String>, String> {
-    let ext = name.rsplit('.').next().unwrap_or("");
-    let Some(path) = rfd::FileDialog::new().add_filter(ext.to_uppercase(), &[ext]).set_file_name(name).set_title("Save").save_file() else {
-        return Ok(None);
-    };
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    Ok(Some(path.display().to_string()))
+/// offer `bytes` to the user in a save dialog (the web version downloads them); Some(where)
+/// when saved
+pub fn save_bytes(name: &str, bytes: &[u8], mime: &str) -> Result<Option<String>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = mime;
+        let ext = name.rsplit('.').next().unwrap_or("");
+        let Some(path) = rfd::FileDialog::new().add_filter(ext.to_uppercase(), &[ext]).set_file_name(name).set_title("Save").save_file() else {
+            return Ok(None);
+        };
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(Some(path.display().to_string()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_download(name, bytes, mime)?;
+        Ok(Some(name.to_string()))
+    }
+}
+
+/// the browser saves `bytes` as a download named `name`
+#[cfg(target_arch = "wasm32")]
+fn web_download(name: &str, bytes: &[u8], mime: &str) -> Result<(), String> {
+    use eframe::wasm_bindgen::JsCast as _;
+    use eframe::web_sys;
+    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(mime);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(|e| format!("{e:?}"))?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|e| format!("{e:?}"))?;
+    let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+    let a = doc.create_element("a").map_err(|e| format!("{e:?}"))?.dyn_into::<web_sys::HtmlAnchorElement>().map_err(|_| "no link element")?;
+    a.set_href(&url);
+    a.set_download(name);
+    a.click();
+    let _ = web_sys::Url::revoke_object_url(&url);
+    Ok(())
+}
+
+/// the media type of an exported file, from its name
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn mime_of(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
+    }
 }
 
 const PICTURES: [&str; 7] = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
@@ -103,6 +146,24 @@ impl CardBuilderApp {
             self.say("Another export is still running", now);
             return;
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // no threads in the browser: make it now, then download it
+            let _ = (ctx, what);
+            let mut imgs = ImageCache::default();
+            imgs.prepare(cb_print::image_srcs(&self.doc));
+            let msg = match make(&self.doc, &imgs, &|_| {}).and_then(|(bytes, note)| save_bytes(&name, &bytes, mime_of(&name)).map(|_| note)) {
+                Ok(note) => format!("Downloaded {name}{note}"),
+                Err(e) => format!("Export failed: {e}"),
+            };
+            self.say(msg, now);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.export_in_background(ctx, name, what, make);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_in_background(&mut self, ctx: &egui::Context, name: String, what: &str, make: impl FnOnce(&Doc, &ImageCache, &dyn Fn(f32)) -> Result<(Vec<u8>, String), String> + Send + 'static) {
         let ext = name.rsplit('.').next().unwrap_or("").to_string();
         // automation: CB_EXPORT_DIR saves straight into a folder, no dialog
         let path = match std::env::var("CB_EXPORT_DIR") {
@@ -229,23 +290,19 @@ impl CardBuilderApp {
         self.tool = Tool::Select;
     }
 
-    /// pick a picture with the system dialog and add it
+    /// pick a picture and add it
     pub(crate) fn pick_image(&mut self, now: f64, at: Option<(f64, f64)>) {
-        if let Some(path) = rfd::FileDialog::new().add_filter("Pictures", &PICTURES).set_title("Add image").pick_file() {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            match std::fs::read(&path) {
-                Ok(b) => self.add_image_bytes(now, &name, &b, at),
-                Err(e) => self.say(format!("Couldn't read {name}: {e}"), now),
-            }
+        if let Some((name, b)) = self.pick_file(PickFor::Image(at), "Add image", "Pictures", &PICTURES, now) {
+            self.add_image_bytes(now, &name, &b, at);
         }
         self.tool = Tool::Select;
     }
 
-    /// a picture for a background: its data URL
-    pub(crate) fn choose_picture(&mut self, now: f64) -> Option<String> {
-        let path = rfd::FileDialog::new().add_filter("Pictures", &PICTURES).set_title("Background picture").pick_file()?;
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| image_data_url(&name, &b)) {
+    /// a picture for the background of `side`: its data URL (the web version puts it in place
+    /// itself once the browser has the file)
+    pub(crate) fn choose_picture(&mut self, now: f64, side: Side) -> Option<String> {
+        let (name, b) = self.pick_file(PickFor::Background(side), "Background picture", "Pictures", &PICTURES, now)?;
+        match image_data_url(&name, &b) {
             Ok((src, _, _)) => Some(src),
             Err(e) => {
                 self.say(format!("Could not read that image: {e}"), now);
@@ -256,32 +313,31 @@ impl CardBuilderApp {
 
     /// replace the picture of image layer `id`, keeping its width
     pub(crate) fn replace_image(&mut self, now: f64, id: &str) {
-        if let Some(path) = rfd::FileDialog::new().add_filter("Pictures", &PICTURES).set_title("Replace image").pick_file() {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| image_data_url(&name, &b)) {
-                Ok((src, iw, ih)) => {
-                    let id = id.to_string();
-                    self.edit(now, None, |d| {
-                        if let Some(l) = d.layer_mut(&id) {
-                            l.h = l.w * ih / iw.max(1.0);
-                            l.src = Some(src);
-                        }
-                    });
-                }
-                Err(e) => self.say(format!("Could not read that image: {e}"), now),
+        if let Some((name, b)) = self.pick_file(PickFor::Replace(id.to_string()), "Replace image", "Pictures", &PICTURES, now) {
+            self.replace_image_bytes(now, id, &name, &b);
+        }
+    }
+
+    pub(crate) fn replace_image_bytes(&mut self, now: f64, id: &str, name: &str, bytes: &[u8]) {
+        match image_data_url(name, bytes) {
+            Ok((src, iw, ih)) => {
+                let id = id.to_string();
+                self.edit(now, None, |d| {
+                    if let Some(l) = d.layer_mut(&id) {
+                        l.h = l.w * ih / iw.max(1.0);
+                        l.src = Some(src);
+                    }
+                });
             }
+            Err(e) => self.say(format!("Could not read that image: {e}"), now),
         }
     }
 
     // ------------------------------------------------------------------ data
 
     pub(crate) fn import_data(&mut self, now: f64) {
-        if let Some(path) = rfd::FileDialog::new().add_filter("Spreadsheet (CSV)", &["csv", "tsv", "txt"]).set_title("Import data").pick_file() {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            match std::fs::read(&path) {
-                Ok(b) => self.import_data_text(&name, &String::from_utf8_lossy(&b), now),
-                Err(e) => self.say(format!("Couldn't read {name}: {e}"), now),
-            }
+        if let Some((name, b)) = self.pick_file(PickFor::Data, "Import data", "Spreadsheet (CSV)", &["csv", "tsv", "txt"], now) {
+            self.import_data_text(&name, &String::from_utf8_lossy(&b), now);
         }
     }
 

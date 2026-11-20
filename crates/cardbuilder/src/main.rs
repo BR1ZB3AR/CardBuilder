@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // no console window on Windows release builds
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     // a couple of command-line flags, handy for packaging checks; anything else is a design file
     // to open (the file manager passes it when a .cb is double-clicked)
@@ -47,6 +48,7 @@ fn main() -> eframe::Result {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A crash in the release build would otherwise vanish without a word (the Windows build has no
 /// console, and the app launcher hides the terminal): show the reason in a message box as well.
 fn show_startup_errors() {
@@ -68,4 +70,26 @@ fn show_startup_errors() {
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
     }));
+}
+
+/// the web version: CardBuilder in the page's canvas (index.html, built with trunk)
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use eframe::wasm_bindgen::JsCast as _;
+    eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    wasm_bindgen_futures::spawn_local(async {
+        let document = eframe::web_sys::window().expect("no window").document().expect("no document");
+        let canvas = document
+            .get_element_by_id("cardbuilder_canvas")
+            .expect("missing #cardbuilder_canvas")
+            .dyn_into::<eframe::web_sys::HtmlCanvasElement>()
+            .expect("#cardbuilder_canvas is not a canvas");
+        let started = eframe::WebRunner::new().start(canvas, eframe::WebOptions::default(), Box::new(|cc| Ok(Box::new(cardbuilder::CardBuilderApp::new(cc))))).await;
+        if let Some(loading) = document.get_element_by_id("loading") {
+            match started {
+                Ok(()) => loading.remove(),
+                Err(e) => loading.set_inner_html(&format!("<p>CardBuilder could not start in this browser: {e:?}</p><p>It needs WebGPU or WebGL 2 — a current Chrome, Edge, Firefox or Safari.</p>")),
+            }
+        }
+    });
 }

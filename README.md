@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://github.com/BR1ZB3AR/CardBuilder/releases/latest/download/CardBuilder-x86_64.msi"><img alt="Windows: download" src="https://img.shields.io/badge/Windows-Download-0078D6?style=for-the-badge&labelColor=333333"></a>
   <a href="https://github.com/BR1ZB3AR/CardBuilder/releases/latest/download/CardBuilder-x86_64.AppImage"><img alt="Linux: AppImage" src="https://img.shields.io/badge/Linux-AppImage-E95420?style=for-the-badge&labelColor=333333&logo=linux&logoColor=white"></a>
+  <a href="https://br1zb3ar.github.io/CardBuilder/"><img alt="Web: open in your browser" src="https://img.shields.io/badge/Web-Open_in_browser-9B7BFF?style=for-the-badge&labelColor=333333"></a>
 </p>
 
 Design cards of every kind — business cards, ID and gift cards, playing and trading cards,
@@ -26,7 +27,10 @@ bleed, crop marks and the backs lined up for double-sided printing.
 - **Both sides:** front and back, or the outside and inside spreads of a folded card, with bleed,
   trim, safe-area and fold guides, and snapping to centre lines and the safe area.
 - **Artwork:** text in 17 fonts (sizes in points, wrapping or shrink-to-fit), pictures (PNG, JPEG,
-  WebP, GIF, SVG), rectangles, ellipses and lines, and backgrounds in colour, gradient or a picture.
+  WebP, GIF, SVG), rectangles, ellipses and lines, vector shapes of any outline (a template's
+  frames, logos and patterns, each a layer you can recolour, resize or delete), solid, dashed or
+  dotted outlines, and backgrounds in colour, gradient or a picture. A layer can be clipped to
+  the one below it, such as a photo in a window shape.
 - **QR codes** for a website, a contact card (vCard), Wi-Fi, a phone number or an email address —
   sharp vectors, with a warning when a code gets too small to scan.
 - **Batch cards:** import a spreadsheet (CSV) and put `{Column}` fields in text and QR codes — one
@@ -44,6 +48,22 @@ bleed, crop marks and the backs lined up for double-sided printing.
   showing its own layers and setting colours.
 - **Design files:** `.cb` files with pictures, fonts and data inside; New, Open, Save, undo for everything.
 - 31 themes, a custom title bar, and a layout that adapts down to small windows.
+
+## In your browser
+
+CardBuilder also runs in a web browser, nothing to install:
+**[br1zb3ar.github.io/CardBuilder](https://br1zb3ar.github.io/CardBuilder/)**, or on Codeberg at
+**[br1zb3ar.codeberg.page/CardBuilder](https://br1zb3ar.codeberg.page/CardBuilder/)**. It's the
+same app, built for WebAssembly. A few things work the browser's way:
+
+- **Saving** downloads the `.cb` design (and exports their PDF or PNG) to your downloads folder;
+  **Open** brings a design back in, and you can also drop `.cb` files, pictures and CSV files
+  onto the page. The design you're working on is kept in the browser between visits.
+- **Templates** live in a folder on the computer, so *Save as template* is in the desktop app only.
+- The **3D preview** needs WebGPU or WebGL 2 (any current Chrome, Edge, Firefox or Safari), and
+  big exports take a moment longer than on the desktop.
+
+Nothing leaves your computer: the web version has no server; it runs entirely in the page.
 
 ## Build from source
 
@@ -65,6 +85,15 @@ To build an AppImage yourself: `./packaging/build-appimage.sh` (→ `target/appi
 builds are made by [the release workflows](.github/workflows): the AppImage in Ubuntu 22.04 (so it
 runs on glibc 2.35 and newer), the Windows installer with [WiX](https://wixtoolset.org)
 ([`packaging/windows`](packaging/windows)).
+
+The web version builds with [trunk](https://trunkrs.dev) and the `wasm32-unknown-unknown` target
+(`rustup target add wasm32-unknown-unknown`):
+
+```sh
+cd crates/cardbuilder
+trunk serve                                  # http://127.0.0.1:8080, rebuilds as you edit
+trunk build --release --public-url ./        # → dist/, what the Pages sites serve
+```
 
 ## Using it
 

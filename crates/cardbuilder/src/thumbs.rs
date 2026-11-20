@@ -24,6 +24,22 @@ pub struct Thumbs {
     tex: HashMap<String, egui::TextureHandle>,
     pending: HashSet<String>,
     done: Done,
+    /// the web version draws them itself, one a frame: the frame it last drew one in
+    #[cfg(target_arch = "wasm32")]
+    drawn_in: Option<u64>,
+}
+
+/// the front of the card `src` shows, rendered small: width, height, premultiplied RGBA
+fn render(src: Source) -> Option<(u32, u32, Vec<u8>)> {
+    let doc = match src {
+        Source::Preset(p) => Some(default_doc(CardFormat::from_preset(p))),
+        Source::File(path) => std::fs::read_to_string(path).ok().and_then(|t| load_design(&t).ok()),
+    }?;
+    let mut imgs = cb_print::ImageCache::default();
+    imgs.prepare(cb_print::image_srcs(&doc));
+    let ppm = HEIGHT / doc.format.sheet().1.max(1.0);
+    let pm = cb_print::render_side(&doc, Side::Front, &cb_print::DrawOptions::preview(None), ppm, false, &imgs)?;
+    Some((pm.width(), pm.height(), pm.take()))
 }
 
 /// a key that changes when a template file is saved again
@@ -44,22 +60,28 @@ impl Thumbs {
         if let Some(t) = self.tex.get(key) {
             return Some(t.id());
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if self.pending.insert(key.to_string()) {
             let (key, src, done, ctx) = (key.to_string(), source(), self.done.clone(), ctx.clone());
             std::thread::spawn(move || {
-                let doc = match src {
-                    Source::Preset(p) => Some(default_doc(CardFormat::from_preset(p))),
-                    Source::File(path) => std::fs::read_to_string(path).ok().and_then(|t| load_design(&t).ok()),
-                };
-                let Some(doc) = doc else { return };
-                let mut imgs = cb_print::ImageCache::default();
-                imgs.prepare(cb_print::image_srcs(&doc));
-                let ppm = HEIGHT / doc.format.sheet().1.max(1.0);
-                if let Some(pm) = cb_print::render_side(&doc, Side::Front, &cb_print::DrawOptions::preview(None), ppm, false, &imgs) {
-                    done.lock().unwrap().push((key, pm.width(), pm.height(), pm.take()));
+                if let Some((w, h, rgba)) = render(src) {
+                    done.lock().unwrap().push((key, w, h, rgba));
                     ctx.request_repaint();
                 }
             });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let frame = ctx.cumulative_frame_nr();
+            if self.drawn_in == Some(frame) {
+                ctx.request_repaint();
+            } else if self.pending.insert(key.to_string()) {
+                self.drawn_in = Some(frame);
+                if let Some((w, h, rgba)) = render(source()) {
+                    self.done.lock().unwrap().push((key.to_string(), w, h, rgba));
+                    ctx.request_repaint();
+                }
+            }
         }
         None
     }

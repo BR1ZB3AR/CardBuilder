@@ -67,6 +67,7 @@ impl DocFile {
 }
 
 /// `path` with the `.cb` extension (added when the user typed a name without it)
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn with_cb_ext(path: PathBuf) -> PathBuf {
     if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(CB_EXT)) {
         path
@@ -217,10 +218,14 @@ impl CardBuilderApp {
         {
             // the browser downloads it; there is no file to keep writing to
             let text = save_cb(&self.doc, &format!("CardBuilder {VERSION}"));
-            match crate::exports::save_bytes(&format!("design.{CB_EXT}"), text.as_bytes(), "application/x-cardbuilder") {
+            let name = match &self.file.path {
+                Some(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                None => format!("{}.{CB_EXT}", cb_core::format::preset(&self.doc.format.preset).map(|p| p.category.noun()).unwrap_or("card").replace(' ', "-")),
+            };
+            match crate::exports::save_bytes(&name, text.as_bytes(), "application/x-cardbuilder") {
                 Ok(Some(_)) => {
                     self.file.baseline = self.doc.clone();
-                    self.say("Design downloaded", now);
+                    self.say(format!("Downloaded {name} — open it again with Open (Ctrl+O)"), now);
                     true
                 }
                 Ok(None) => false,
@@ -269,8 +274,15 @@ impl CardBuilderApp {
                 self.open_file(&p);
             }
         }
+        // the browser's file chooser answers later: the design opens in `open_picked_design`
         #[cfg(target_arch = "wasm32")]
-        self.say("Drop a CardBuilder design (.cb) onto the page to open it", now);
+        let _ = self.pick_file(crate::pick::PickFor::Design, "Open design", "CardBuilder design", &[CB_EXT], now);
+    }
+
+    /// a design the browser's file chooser handed over ("Save changes?" was answered before)
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_picked_design(&mut self, name: &str, text: &str, now: f64) {
+        self.open_design_text(name, text, None, now);
     }
 
     /// Open a design file from disk right away (no question asked): a `.cb` becomes the file
@@ -288,7 +300,7 @@ impl CardBuilderApp {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = name;
+            let _ = (name, now);
             false
         }
     }

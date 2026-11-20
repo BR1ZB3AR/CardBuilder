@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "cardbuilder"
-version = "0.0.11"
+version = "0.0.14"
 dependencies = [
  "base64",
  "bytemuck",
@@ -651,17 +651,20 @@ dependencies = [
  "env_logger",
  "glam",
  "image",
+ "js-sys",
  "log",
  "lucide-icons",
  "rfd",
  "serde",
  "serde_json",
+ "wasm-bindgen-futures",
+ "web-sys",
  "winresource",
 ]
 
 [[package]]
 name = "cb-core"
-version = "0.0.11"
+version = "0.0.14"
 dependencies = [
  "serde",
  "serde_json",
@@ -669,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "cb-print"
-version = "0.0.11"
+version = "0.0.14"
 dependencies = [
  "base64",
  "cb-core",
@@ -679,6 +682,7 @@ dependencies = [
  "resvg",
  "rqrr",
  "rustybuzz",
+ "svgtypes",
 ]
 
 [[package]]

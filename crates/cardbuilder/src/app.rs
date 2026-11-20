@@ -159,6 +159,9 @@ pub struct CardBuilderApp {
     pub(crate) viewer: crate::view3d::Viewer3d,
     pub(crate) jobs: crate::exports::Jobs,
     pending_files: Arc<Mutex<Vec<(String, Result<Vec<u8>, String>)>>>,
+    /// files picked in the browser's file chooser, on their way in
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) picks: crate::pick::Inbox,
     applied_theme: Option<(String, Option<String>)>,
     pub(crate) top_density: crate::topbar::Density,
     pub(crate) file: crate::file::DocFile,
@@ -184,9 +187,13 @@ impl CardBuilderApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         style::install_fonts(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
             cb_core::doc::seed_uids(d.as_millis() as u64);
         }
+        // the browser has no system clock in Rust's std (it would panic): ask JavaScript
+        #[cfg(target_arch = "wasm32")]
+        cb_core::doc::seed_uids(js_sys::Date::now() as u64);
         let saved_doc = cc.storage.and_then(|s| s.get_string(DOC_KEY));
         let (doc, mut prefs) = restore_saved(saved_doc.as_deref(), cc.storage.and_then(|s| s.get_string(PREFS_KEY)).as_deref());
         let mut file = crate::file::DocFile::restore(prefs.last_file.as_deref(), &doc);
@@ -215,6 +222,7 @@ impl CardBuilderApp {
             viewer: crate::view3d::Viewer3d::new(cc.wgpu_render_state.clone()),
             jobs: Default::default(),
             pending_files: Default::default(),
+            picks: crate::pick::Inbox::new(&cc.egui_ctx),
             applied_theme: None,
             top_density: crate::topbar::Density::Full,
             file,
@@ -342,6 +350,7 @@ impl CardBuilderApp {
             ShapeKind::Rect => "Rectangle",
             ShapeKind::Ellipse => "Ellipse",
             ShapeKind::Line => "Line",
+            ShapeKind::Path => "Vector shape",
         }
         .into();
         if kind == ShapeKind::Ellipse {
@@ -482,6 +491,10 @@ impl CardBuilderApp {
             _ => Mode::Split,
         };
     }
+    /// the 3D camera's (yaw, pitch, zoom)
+    pub fn camera_for_tests(&self) -> (f64, f64, f64) {
+        self.viewer.camera()
+    }
     pub fn set_side_for_tests(&mut self, back: bool) {
         self.side = if back { Side::Back } else { Side::Front };
     }
@@ -504,13 +517,27 @@ impl CardBuilderApp {
                 self.request_open_path(f.path().to_path_buf(), now);
                 continue;
             }
-            let bytes = match f.bytes() {
-                Ok(b) => Ok(b.to_vec()),
-                Err(_) => std::fs::read(f.path()).map_err(|e| e.to_string()),
-            };
-            match bytes {
-                Ok(b) => self.open_dropped(&name, b, now),
-                Err(e) => self.say(format!("Couldn't read {name}: {e}"), now),
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let bytes = match f.bytes() {
+                    Ok(b) => Ok(b.to_vec()),
+                    Err(_) => std::fs::read(f.path()).map_err(|e| e.to_string()),
+                };
+                match bytes {
+                    Ok(b) => self.open_dropped(&name, b, now),
+                    Err(e) => self.say(format!("Couldn't read {name}: {e}"), now),
+                }
+            }
+            // the browser reads a dropped file in its own time: it arrives through pending_files
+            #[cfg(target_arch = "wasm32")]
+            {
+                let queue = self.pending_files.clone();
+                let ctx = ctx.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let r = f.bytes_async().await;
+                    queue.lock().unwrap().push((name, r));
+                    ctx.request_repaint();
+                });
             }
         }
         let arrived: Vec<_> = self.pending_files.lock().unwrap().drain(..).collect();
@@ -792,8 +819,13 @@ impl eframe::App for CardBuilderApp {
         let now = ctx.input(|i| i.time);
         self.shortcuts(&ctx, now);
         self.dropped_files(&ctx, now);
+        self.take_picked(now);
         self.fix_selection();
         self.poll_exports(now);
+        if self.viewer.snapshot_pending {
+            // the browser reads the snapshot back in its own time: keep looking for it
+            ctx.request_repaint();
+        }
         self.apply_theme(&ctx);
         self.sync_design_fonts(&ctx);
         // background rendering: the editor's card image and the 3D textures
@@ -865,6 +897,7 @@ pub(crate) fn kind_label(l: &Layer) -> &'static str {
             ShapeKind::Rect => "Rectangle",
             ShapeKind::Ellipse => "Ellipse",
             ShapeKind::Line => "Line",
+            ShapeKind::Path => "Vector shape",
         },
         LayerType::Qr => "QR code",
     }

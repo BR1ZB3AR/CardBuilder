@@ -8,6 +8,7 @@ mod file;
 mod formats;
 pub mod gpu;
 mod panes;
+mod pick;
 mod sidebar;
 mod style;
 mod templates;

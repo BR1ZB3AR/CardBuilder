@@ -163,7 +163,65 @@ fn outlined_text_leaves_the_letters_open() {
     assert!(dark(&d).1 < 50, "a filled I");
 }
 
-/// A design file rendered to PNGs (both sides, bleed included):
+#[test]
+fn vector_shapes_dotted_outlines_and_clipped_pictures() {
+    use cb_core::doc::{Background, BgMode, Dash, VectorPath};
+    let mut d = default_doc(CardFormat::from_preset(preset("bc-eu").unwrap()));
+    d.layers.clear();
+    d.front = Background { mode: BgMode::Solid, color: "#ffffff".into(), ..Default::default() };
+    // a black frame with a square hole (even-odd), 40 mm across at the left
+    let frame = VectorPath { d: "M0 0H40V40H0Z M10 10H30V30H10Z".into(), w: 40.0, h: 40.0, even_odd: true };
+    d.layers.push(Layer::vector(Side::Front, 20.0, 27.5, 40.0, 40.0, frame, Some("#000000")));
+    // red over the whole card, clipped to the frame: it shows on the frame only
+    let mut red = Layer::rect(Side::Front, 42.5, 27.5, 85.0, 55.0, "#ff0000");
+    red.clip = true;
+    d.layers.push(red);
+    // a dotted blue box at the right
+    let mut dotted = Layer::rect(Side::Front, 65.0, 27.5, 30.0, 30.0, "#000000");
+    dotted.fill = None;
+    dotted.stroke = Some("#0000ff".into());
+    dotted.stroke_w = Some(1.0);
+    dotted.dash = Some(Dash::Dotted);
+    d.layers.push(dotted);
+    let imgs = ImageCache::default();
+    let ppm = 10.0;
+    let render = |d: &cb_core::Doc| render_side(d, Side::Front, &DrawOptions::preview(None), ppm, false, &imgs).unwrap();
+    let at = |pm: &cb_print::tiny_skia::Pixmap, x: f64, y: f64| {
+        let p = pm.pixel((x * ppm) as u32, (y * ppm) as u32).unwrap();
+        (p.red(), p.green(), p.blue())
+    };
+    let pm = render(&d);
+    assert_eq!(at(&pm, 4.0, 27.5), (255, 0, 0), "the frame shows the red clipped to it");
+    assert_eq!(at(&pm, 20.0, 27.5), (255, 255, 255), "the hole stays open");
+    assert_eq!(at(&pm, 45.0, 4.0), (255, 255, 255), "no red outside the frame");
+    // the box's top edge: a row of separate dots, one width apart
+    let y = ((27.5 - 15.0) * ppm) as u32;
+    let row: Vec<bool> = (((50.0 * ppm) as u32)..((80.0 * ppm) as u32)).map(|x| pm.pixel(x, y).unwrap().blue() > 128 && pm.pixel(x, y).unwrap().red() < 128).collect();
+    let dots = row.windows(2).filter(|w| w[1] && !w[0]).count() + usize::from(row[0]);
+    assert!((13..=16).contains(&dots), "{dots} dots along 30 mm");
+    // clicks: on the frame yes, in its hole no (the layers below get them)
+    let fill = |s: &str| s.to_string();
+    assert!(cb_print::draw::layer_hit(&d.layers[0], 4.0, 27.5, 0.3, &fill));
+    assert!(!cb_print::draw::layer_hit(&d.layers[0], 20.0, 27.5, 0.3, &fill));
+    // an outline-only box: on its edge yes, inside no
+    assert!(cb_print::draw::layer_hit(&d.layers[2], 65.0, 12.5, 0.3, &fill), "on the dotted edge");
+    assert!(!cb_print::draw::layer_hit(&d.layers[2], 65.0, 27.5, 0.3, &fill), "inside the dotted box");
+    // a filled rectangle by its box
+    assert!(cb_print::draw::layer_hit(&d.layers[1], 70.0, 50.0, 0.3, &fill));
+    // the frame hidden: what is clipped to it hides too
+    d.layers[0].visible = false;
+    assert_eq!(at(&render(&d), 4.0, 27.5), (255, 255, 255));
+    d.layers[0].visible = true;
+    // the PDF clips by the even-odd rule and dots the outline
+    let mut pdf = cb_print::pdf::PdfWriter::new("test", 300.0);
+    let mut c = cb_print::pdf::PdfCanvas::new(&mut pdf);
+    cb_print::draw_side(&mut c, &d, Side::Front, &DrawOptions::print(None), &imgs, cb_print::tiny_skia::Transform::identity());
+    assert!(c.out.contains("W* n"), "even-odd clip");
+    assert!(c.out.contains("] 0 d"), "dash pattern");
+}
+
+/// A design file rendered to PNGs (both sides, bleed included), and with `CB_RENDER_PDF=1` to
+/// a card PDF too:
 /// `CB_RENDER_FILE=card.cb CB_SCREENSHOT_DIR=out cargo test -p cb-print --test render -- --ignored render_a_file`
 #[test]
 #[ignore = "a tool: renders the file named by CB_RENDER_FILE"]
@@ -178,5 +236,9 @@ fn render_a_file() {
     for side in [Side::Front, Side::Back] {
         let pm = render_side(&d, side, &DrawOptions::preview(None), ppm, false, &imgs).unwrap();
         pm.save_png(format!("{dir}/{stem}-{side:?}.png")).unwrap();
+    }
+    if std::env::var("CB_RENDER_PDF").is_ok() {
+        let pdf = cb_print::sheets::cards_pdf(&d, &[None], &imgs, &|_| {}).unwrap();
+        std::fs::write(format!("{dir}/{stem}.pdf"), pdf).unwrap();
     }
 }

@@ -1,8 +1,9 @@
 //! The 3D preview: the card in its paper stock, standing in a little photo studio. Orbit with
 //! the mouse (right-drag pans, the wheel zooms), animated views (front, ¾, back, inside), a flip,
-//! auto-rotate, and a 2000 px snapshot. Textures come from the background renderer
+//! auto-rotate, a view gizmo (`gizmo.rs`) and a 2000 px snapshot. Textures come from the background renderer
 //! (`worker.rs`); drawing happens on the GPU (`gpu.rs`).
 
+mod gizmo;
 pub mod gpu;
 
 use crate::app::View3d;
@@ -37,6 +38,8 @@ struct Anim {
     to: Cam,
     t0: f64,
     dur: f64,
+    /// the pan and zoom it started from, when it also brings them back to normal (home view)
+    home: Option<(Vec3, f64)>,
 }
 
 pub struct Viewer3d {
@@ -165,7 +168,7 @@ impl Viewer3d {
         // the short way round
         let d = (to.yaw - self.cam.yaw).rem_euclid(2.0 * PI);
         to.yaw = self.cam.yaw + if d > PI { d - 2.0 * PI } else { d };
-        self.anim = Some(Anim { from: self.cam, to, t0: now, dur });
+        self.anim = Some(Anim { from: self.cam, to, t0: now, dur, home: None });
     }
 
     pub fn set_view(&mut self, v: View3d, doc: &Doc, now: f64) {
@@ -177,7 +180,19 @@ impl Viewer3d {
     /// turn the card over (half a turn)
     pub fn flip(&mut self, now: f64) {
         let from = self.anim.as_ref().map(|a| a.to).unwrap_or(self.cam);
-        self.anim = Some(Anim { from: self.cam, to: Cam { yaw: from.yaw + PI, ..from }, t0: now, dur: 0.8 });
+        self.anim = Some(Anim { from: self.cam, to: Cam { yaw: from.yaw + PI, ..from }, t0: now, dur: 0.8, home: None });
+    }
+
+    /// turn the camera round the card by a mouse drag of `d` points
+    fn orbit(&mut self, d: egui::Vec2) {
+        self.anim = None;
+        self.cam.yaw -= d.x as f64 * 0.008;
+        self.cam.pitch = (self.cam.pitch + d.y as f64 * 0.006).clamp(-gizmo::MAX_PITCH, gizmo::MAX_PITCH);
+    }
+
+    /// the camera's (yaw, pitch, zoom), for tests
+    pub fn camera(&self) -> (f64, f64, f64) {
+        (self.cam.yaw, self.cam.pitch, self.cam.zoom)
     }
 
     pub fn reset_view(&mut self) {
@@ -237,7 +252,9 @@ impl Viewer3d {
         FrameParams { globals: g, size }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, rect: Rect, doc: &Doc, now: f64) -> egui::Response {
+    /// draw and handle the 3D view in `rect`; returns the view the pane's header should show
+    /// when the view gizmo picks one
+    pub fn show(&mut self, ui: &mut egui::Ui, rect: Rect, doc: &Doc, now: f64) -> Option<View3d> {
         let resp = ui.interact(rect, ui.scope_id().with("view3d"), Sense::click_and_drag());
         // backdrop
         let (top, bottom) = backdrop_colors(doc);
@@ -254,7 +271,7 @@ impl Viewer3d {
         }
         if !self.gpu_ok {
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, "3D preview needs a graphics card driver (Vulkan, DirectX 12 or OpenGL)", egui::FontId::proportional(13.0), Color32::from_gray(90));
-            return resp;
+            return None;
         }
         self.sync_mesh(doc);
         if self.fresh {
@@ -266,10 +283,7 @@ impl Viewer3d {
         let dt = (now - self.last_time).clamp(0.0, 0.1);
         self.last_time = now;
         if resp.dragged_by(egui::PointerButton::Primary) {
-            let d = resp.drag_delta();
-            self.anim = None;
-            self.cam.yaw -= d.x as f64 * 0.008;
-            self.cam.pitch = (self.cam.pitch + d.y as f64 * 0.006).clamp(-1.35, 1.35);
+            self.orbit(resp.drag_delta());
         }
         if resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) {
             let d = resp.drag_delta();
@@ -298,13 +312,18 @@ impl Viewer3d {
             let t = ((now - a.t0) / a.dur).clamp(0.0, 1.0);
             let e = t * t * (3.0 - 2.0 * t);
             let lerp = |x: f64, y: f64| x + (y - x) * e;
-            self.cam = Cam { yaw: lerp(a.from.yaw, a.to.yaw), pitch: lerp(a.from.pitch, a.to.pitch), zoom: self.cam.zoom };
+            let mut zoom = self.cam.zoom;
+            if let Some((pan, z)) = gizmo::home_step(a, e) {
+                self.pan = pan;
+                zoom = z;
+            }
+            self.cam = Cam { yaw: lerp(a.from.yaw, a.to.yaw), pitch: lerp(a.from.pitch, a.to.pitch), zoom };
             if t >= 1.0 {
                 self.anim = None;
             }
             ui.ctx().request_repaint();
         }
-        if doc.scene.auto_rotate && !resp.dragged() {
+        if doc.scene.auto_rotate && !resp.dragged() && !ui.ctx().is_being_dragged(gizmo::area_id(ui)) {
             self.cam.yaw += dt * 0.45;
             ui.ctx().request_repaint();
         }
@@ -315,11 +334,15 @@ impl Viewer3d {
         }
 
         let ppp = ui.ctx().pixels_per_point();
-        let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
+        // exactly the pixels egui gives the paint callback (it rounds each edge), so the blit
+        // copies pixel for pixel instead of resampling the picture
+        let span = |a: f32, b: f32| ((b * ppp).round() - (a * ppp).round()).max(1.0) as u32;
+        let size = [span(rect.min.x, rect.max.x), span(rect.min.y, rect.max.y)];
         let params = self.params(doc, size, now);
         self.last_params = Some(params.clone());
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, Paint3d { params }));
-        resp
+        // the gizmo last: drawn over the card, and on top for the mouse
+        self.gizmo(ui, rect, doc, now)
     }
 
     pub fn request_snapshot(&mut self, doc: &Doc) {

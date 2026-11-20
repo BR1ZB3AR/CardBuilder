@@ -365,3 +365,64 @@ fn an_outlined_number_can_be_edited_and_deleted() {
     h.run_steps(3);
     assert!(h.state().doc_for_tests().layer(&id).is_none(), "deleted");
 }
+
+#[test]
+fn vector_artwork_is_picked_where_it_is_painted_and_restyled() {
+    use cb_core::doc::{Dash, LayerType, VectorPath};
+    // a red "photo" under a black frame with a window, and a picture clipped to the frame
+    let mut doc = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-poker").unwrap()));
+    doc.layers.clear();
+    let mut photo = cb_core::Layer::rect(cb_core::Side::Front, 31.75, 44.45, 63.5, 88.9, "#ff0000");
+    photo.name = "Photo".into();
+    let frame = cb_core::Layer::vector(cb_core::Side::Front, 31.75, 44.45, 63.5, 88.9, VectorPath { d: "M0 0H100V100H0Z M20 20H80V80H20Z".into(), w: 100.0, h: 100.0, even_odd: true }, Some("#000000"));
+    let mut glow = cb_core::Layer::new("Glow", LayerType::Image, cb_core::Side::Front, 31.75, 44.45, 63.5, 88.9);
+    glow.clip = true;
+    glow.visible = false;
+    let (photo_id, frame_id, glow_id) = (photo.id.clone(), frame.id.clone(), glow.id.clone());
+    doc.layers = vec![photo, frame, glow];
+    let mut h = app();
+    h.state_mut().open_json("frame.cb", &cb_core::doc::save_cb(&doc, "test"));
+    h.run_steps(4);
+    // on the frame: the frame
+    let on_frame = h.state().card_point_for_tests(4.0, 44.45);
+    click(&mut h, on_frame);
+    assert_eq!(h.state().selected_for_tests().map(|l| l.id.clone()), Some(frame_id.clone()), "a click on the frame picks it");
+    assert!(h.query_all_by_label("Vector shape").count() >= 2, "the sidebar calls it a vector shape (its section and its row)");
+    // give it a dotted outline
+    h.get_by_label("Outline").click();
+    h.run_steps(3);
+    h.get_by_label("Dotted").click();
+    h.run_steps(3);
+    let f = h.state().doc_for_tests().layer(&frame_id).unwrap().clone();
+    assert!(f.stroke.is_some() && f.stroke_w.unwrap_or(0.0) > 0.0, "outlined");
+    assert_eq!(f.dash, Some(Dash::Dotted));
+    assert_eq!(f.fill.as_deref(), Some("#000000"), "still filled");
+    // in the window: the click goes through to the photo below
+    let in_window = h.state().card_point_for_tests(31.75, 44.45);
+    click(&mut h, in_window);
+    assert_eq!(h.state().selected_for_tests().map(|l| l.id.clone()), Some(photo_id), "a click in the window picks what shows there");
+    // the clipped picture keeps its setting through a save
+    let back = cb_core::doc::load_design(&cb_core::doc::save_cb(h.state().doc_for_tests(), "test")).unwrap();
+    assert!(back.layer(&glow_id).unwrap().clip);
+}
+
+#[test]
+fn a_click_never_nudges_a_layer_onto_a_guide() {
+    // a picture whose top edge is a hair inside the bleed edge, its centre near the middle line
+    let mut doc = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("game-poker").unwrap()));
+    doc.layers.clear();
+    let mut pic = cb_core::Layer::rect(cb_core::Side::Front, 31.9, 40.0, 40.0, 85.998, "#3366cc");
+    pic.y = -2.999 + pic.h / 2.0;
+    let before = pic.clone();
+    doc.layers.push(pic);
+    let mut h = app();
+    h.state_mut().open_json("pic.cb", &cb_core::doc::save_cb(&doc, "test"));
+    h.run_steps(4);
+    let p = h.state().card_point_for_tests(before.x, 30.0);
+    click(&mut h, p);
+    assert_eq!(h.state().selected_for_tests().map(|l| l.id.clone()), Some(before.id.clone()));
+    assert_eq!(h.state().doc_for_tests().layer(&before.id).unwrap(), &before, "selected, not moved");
+    // a real drag still moves it, snapping as before
+    drag(&mut h, p, p + vec2(40.0, 0.0), Modifiers::NONE);
+    assert!(h.state().doc_for_tests().layer(&before.id).unwrap().x > before.x + 1.0);
+}

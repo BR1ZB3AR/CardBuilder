@@ -1,3 +1,4 @@
 /target
 *.AppImage
 *.cb.part
+/crates/cardbuilder/dist

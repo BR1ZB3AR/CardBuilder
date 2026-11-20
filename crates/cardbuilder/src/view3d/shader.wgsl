@@ -130,17 +130,34 @@ fn to_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3<f32>(0.0031308));
 }
 
+// the print under one pixel, sharp: the pixel's footprint on the texture split 2 × 2, each
+// quarter sampled from a finer mip level (anisotropic). A single trilinear tap would mix in
+// the next-smaller, blurrier level and soften fine text and dots.
+fn print_at(t: texture_2d<f32>, uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
+    let a = dx * 0.25;
+    let b = dy * 0.25;
+    let gx = dx * 0.4;
+    let gy = dy * 0.4;
+    return 0.25 * (textureSampleGrad(t, samp, uv - a - b, gx, gy) + textureSampleGrad(t, samp, uv + a - b, gx, gy)
+        + textureSampleGrad(t, samp, uv - a + b, gx, gy) + textureSampleGrad(t, samp, uv + a + b, gx, gy));
+}
+
 @fragment
 fn fs_main(in: VOut) -> @location(0) vec4<f32> {
-    // both sides sampled unconditionally (uniform control flow), then the right one picked
-    let cf = textureSample(tex_front, samp, in.uv);
-    let cb = textureSample(tex_back, samp, in.uv);
-    let mf = textureSample(mask_front, samp, in.uv);
-    let mb = textureSample(mask_back, samp, in.uv);
+    // derivatives in uniform control flow; the samples below may branch
+    let dx = dpdx(in.uv);
+    let dy = dpdy(in.uv);
     let is_back = in.face > 0.5 && in.face < 1.5;
     let is_edge = in.face > 1.5;
-    var base = select(cf.rgb, cb.rgb, is_back);
-    var mask = select(mf.rgb, mb.rgb, is_back);
+    var base: vec3<f32>;
+    var mask: vec3<f32>;
+    if (is_back) {
+        base = print_at(tex_back, in.uv, dx, dy).rgb;
+        mask = textureSampleGrad(mask_back, samp, in.uv, dx, dy).rgb;
+    } else {
+        base = print_at(tex_front, in.uv, dx, dy).rgb;
+        mask = textureSampleGrad(mask_front, samp, in.uv, dx, dy).rgb;
+    }
     if (is_edge) {
         base = g.paper.rgb * 0.82;
         mask = vec3<f32>(0.0);

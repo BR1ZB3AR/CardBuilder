@@ -232,7 +232,9 @@ impl CardBuilderApp {
             self.viewer.set_view(v, &self.doc, now);
         }
         let body = Rect::from_min_max(pos2(rect.left(), rect.top() + HEAD), rect.max);
-        self.viewer.show(ui, body, &self.doc, now);
+        if let Some(v) = self.viewer.show(ui, body, &self.doc, now) {
+            self.view3d = v;
+        }
         let painter = ui.painter_at(body);
 
         // stock chip (top left) and warnings

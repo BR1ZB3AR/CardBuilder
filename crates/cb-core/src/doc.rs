@@ -61,6 +61,43 @@ pub enum ShapeKind {
     Rect,
     Ellipse,
     Line,
+    /// any outline (`Layer::path`): artwork from a template or an SVG
+    Path,
+}
+
+/// A vector outline in SVG path syntax, drawn into its layer's box: the path's own box
+/// (0, 0)–(w, h) is stretched onto the layer's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorPath {
+    /// SVG path data (`M`, `L`, `C`, `A`, `Z` …)
+    pub d: String,
+    /// the size of the box the path data spans, in its own units
+    pub w: f64,
+    pub h: f64,
+    /// holes by the even-odd rule (otherwise by winding direction)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub even_odd: bool,
+}
+
+/// how an outline is drawn: solid unless dashed or dotted
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dash {
+    Dashed,
+    Dotted,
+}
+
+impl Dash {
+    /// on/off lengths along the outline for a line `width` wide (mm); a dot is a
+    /// round-capped dash of (almost) no length
+    pub fn intervals(self, width: f64) -> [f64; 2] {
+        let w = width.max(0.01);
+        match self {
+            Dash::Dashed => [3.0 * w, 2.0 * w],
+            Dash::Dotted => [w * 0.001, w * 1.999],
+        }
+    }
 }
 
 /// metallic foil stamped on top of the print
@@ -293,6 +330,15 @@ pub struct Layer {
     /// corner radius, mm
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radius: Option<f64>,
+    /// the outline of a vector shape (`ShapeKind::Path`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<VectorPath>,
+    /// a dashed or dotted outline (shapes)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dash: Option<Dash>,
+    /// shown only inside the layer below it (a photo in a window shape)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clip: bool,
     // QR code (colours: `color` = modules, `fill` = background, none = transparent)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qr: Option<QrSpec>,
@@ -337,9 +383,35 @@ impl Layer {
             stroke: None,
             stroke_w: None,
             radius: None,
+            path: None,
+            dash: None,
+            clip: false,
             qr: None,
             foil: None,
             spot_uv: false,
+        }
+    }
+
+    /// a vector shape filled with `fill` (callers add an outline if it has one)
+    pub fn vector(side: Side, x: f64, y: f64, w: f64, h: f64, path: VectorPath, fill: Option<&str>) -> Layer {
+        let mut l = Layer::new("Vector shape", LayerType::Shape, side, x, y, w, h);
+        l.shape = Some(ShapeKind::Path);
+        l.path = Some(path);
+        l.fill = fill.map(Into::into);
+        l
+    }
+
+    /// set the layer's main colour: a shape's fill (or its outline when it has no fill),
+    /// otherwise its `color` (text, QR code)
+    pub fn set_main_color(&mut self, c: &str) {
+        if self.kind == LayerType::Shape {
+            if self.fill.is_some() || (self.shape != Some(ShapeKind::Line) && self.stroke.is_none()) {
+                self.fill = Some(c.into());
+            } else {
+                self.stroke = Some(c.into());
+            }
+        } else {
+            self.color = Some(c.into());
         }
     }
 
@@ -657,7 +729,7 @@ impl Doc {
         }
         for (id, c) in &v.options[i].recolor {
             if let Some(l) = self.layers.iter_mut().find(|l| &l.id == id) {
-                l.color = Some(c.clone());
+                l.set_main_color(c);
             }
         }
     }
@@ -1369,6 +1441,36 @@ mod tests {
         // a design without a choice saves as before
         let plain = default_doc(CardFormat::from_preset(preset("game-poker").unwrap()));
         assert!(!save_cb(&plain, "test").contains("variants"));
+    }
+
+    #[test]
+    fn vector_shapes_take_the_faction_colour_and_round_trip() {
+        let mut doc = default_doc(CardFormat::from_preset(preset("game-poker").unwrap()));
+        let dots = VectorPath { d: "M0 0h1v1h-1zM2 0h1v1h-1z".into(), w: 3.0, h: 1.0, even_odd: false };
+        let mut logo = Layer::vector(Side::Back, 30.0, 40.0, 9.0, 3.0, dots, Some("#03bfff"));
+        logo.id = "logo".into();
+        let mut ring = Layer::vector(Side::Back, 30.0, 40.0, 9.0, 3.0, VectorPath { d: "M0 0L5 5".into(), w: 5.0, h: 5.0, even_odd: true }, None);
+        ring.id = "ring".into();
+        ring.stroke = Some("#000000".into());
+        ring.stroke_w = Some(0.3);
+        ring.dash = Some(Dash::Dotted);
+        let mut photo = Layer::new("Photo", LayerType::Image, Side::Back, 30.0, 40.0, 9.0, 3.0);
+        photo.clip = true;
+        doc.layers.extend([logo, ring, photo]);
+        let opt = |n: &str, c: &str| VariantOption { name: n.into(), color: c.into(), show: vec![], recolor: vec![("logo".into(), c.into()), ("ring".into(), c.into())] };
+        doc.variants = Some(Variants { label: "Faction".into(), hint: None, options: vec![opt("RES", "#03bfff"), opt("XFAC", "#ed1c24")], active: None });
+        doc.apply_variant(1);
+        let get = |d: &Doc, id: &str| d.layers.iter().find(|l| l.id == id).unwrap().clone();
+        // a filled shape takes the colour as its fill, an outline-only one as its outline
+        assert_eq!(get(&doc, "logo").fill.as_deref(), Some("#ed1c24"));
+        assert_eq!((get(&doc, "ring").fill, get(&doc, "ring").stroke.as_deref()), (None, Some("#ed1c24")));
+        let back = load_design(&save_cb(&doc, "test")).unwrap();
+        assert_eq!(back.layers, doc.layers);
+        let json = save_cb(&doc, "test");
+        assert!(json.contains("\"dash\": \"dotted\"") && json.contains("\"clip\": true") && json.contains("\"evenOdd\": true"), "{json}");
+        // layers without the new settings save as before
+        assert!(!save_cb(&default_doc(CardFormat::from_preset(preset("game-poker").unwrap())), "test").contains("\"clip\""));
+        assert_eq!(Dash::Dotted.intervals(0.5)[1] + Dash::Dotted.intervals(0.5)[0], 1.0, "dots one width apart");
     }
 
     #[test]
