@@ -289,6 +289,7 @@ impl CardBuilderApp {
         let mut chosen: Option<Export> = None;
         let mut save_as = false;
         let mut save_template = false;
+        let mut import_templates = false;
         let mut print = false;
         let fmt = self.doc.format.clone();
         let records = self.doc.records();
@@ -316,17 +317,25 @@ impl CardBuilderApp {
             if menu_row(ui, Icon::Save, "Save as…", ".cb — this app's design file (Ctrl+Shift+S)", false, true) {
                 save_as = true;
             }
-            // templates live in a folder on the computer, which the browser can't keep
-            if cfg!(not(target_arch = "wasm32")) && menu_row(ui, Icon::LayoutTemplate, "Save as template…", "shows in the card picker, on this computer", false, true) {
+            // templates live in a folder on the computer, or in the browser
+            let kept = if cfg!(target_arch = "wasm32") { "shows in the card picker, kept in this browser" } else { "shows in the card picker, on this computer" };
+            if menu_row(ui, Icon::LayoutTemplate, "Save as template…", kept, false, true) {
                 save_template = true;
+            }
+            if cfg!(target_arch = "wasm32") && menu_row(ui, Icon::Import, "Import templates…", ".cb template files, kept in this browser", false, true) {
+                import_templates = true;
             }
             if has_data && menu_row(ui, Icon::FileSpreadsheet, "Data as CSV", "the card data, to edit in a spreadsheet", false, true) {
                 chosen = Some(Export::Csv);
             }
         });
-        self.popups.export = open && chosen.is_none() && !save_as && !print && !save_template;
+        self.popups.export = open && chosen.is_none() && !save_as && !print && !save_template && !import_templates;
         if save_template {
             self.save_as_template(now);
+        }
+        #[cfg(target_arch = "wasm32")]
+        if import_templates {
+            self.pick_templates();
         }
         if let Some(e) = chosen {
             self.export(&ctx, e, now);

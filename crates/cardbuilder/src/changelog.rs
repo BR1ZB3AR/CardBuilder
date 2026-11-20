@@ -10,6 +10,16 @@ pub type Release = (
 
 pub const CHANGELOG: &[Release] = &[
     (
+        "0.0.16",
+        "2026-11-20",
+        "Templates in the web version",
+        &[
+            ("new", "The web version keeps templates too, in your browser: drop .cb template files on the page, or use Export › Import templates…, and they show in the card picker in their own group, as on the desktop. A design that isn't a template becomes one named after its file."),
+            ("new", "Save as template… works in the web version: give the template a name and it's kept in this browser, in the card picker."),
+            ("new", "In the web version, right-click a template in the card picker (or press and hold) to remove it from the browser."),
+        ],
+    ),
+    (
         "0.0.15",
         "2026-11-20",
         "Preferences and the Assistant",

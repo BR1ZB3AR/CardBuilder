@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "cardbuilder"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "base64",
  "bytemuck",
@@ -664,6 +664,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tiny_http",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "winresource",
@@ -671,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "cb-core"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "serde",
  "serde_json",
@@ -679,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "cb-print"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "base64",
  "cb-core",

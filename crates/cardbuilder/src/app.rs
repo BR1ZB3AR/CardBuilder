@@ -131,6 +131,9 @@ pub struct Popups {
     pub theme_mode: Option<bool>,
     /// 0 standard, 1 liquid glass, 2 cyberpunk, 3 high contrast
     pub theme_kind: Option<u8>,
+    /// Save as template… in the browser: the name being typed
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub template_name: Option<String>,
     /// Preferences and the page it shows
     pub prefs: bool,
     pub prefs_page: crate::preferences::PrefsPage,
@@ -206,6 +209,9 @@ impl CardBuilderApp {
         // the browser has no system clock in Rust's std (it would panic): ask JavaScript
         #[cfg(target_arch = "wasm32")]
         cb_core::doc::seed_uids(js_sys::Date::now() as u64);
+        // the templates this browser keeps arrive a moment later
+        #[cfg(target_arch = "wasm32")]
+        crate::templates::browser::load(&cc.egui_ctx);
         let saved_doc = cc.storage.and_then(|s| s.get_string(DOC_KEY));
         let (doc, mut prefs) = restore_saved(saved_doc.as_deref(), cc.storage.and_then(|s| s.get_string(PREFS_KEY)).as_deref());
         let mut file = crate::file::DocFile::restore(prefs.last_file.as_deref(), &doc);
@@ -535,7 +541,8 @@ impl CardBuilderApp {
 
     // ------------------------------------------------------------------ dropped files
 
-    /// files dropped onto the window: a design opens, a spreadsheet becomes data, a picture artwork
+    /// files dropped onto the window: a design opens (the web version keeps a template), a
+    /// spreadsheet becomes data, a picture artwork
     fn dropped_files(&mut self, ctx: &egui::Context, now: f64) {
         let files = ctx.input(|i| i.raw.dropped_files.clone());
         for f in files {
@@ -568,11 +575,20 @@ impl CardBuilderApp {
             }
         }
         let arrived: Vec<_> = self.pending_files.lock().unwrap().drain(..).collect();
+        // the web version keeps dropped template files, all together
+        #[cfg(target_arch = "wasm32")]
+        let mut templates = Vec::new();
         for (name, r) in arrived {
             match r {
+                #[cfg(target_arch = "wasm32")]
+                Ok(bytes) if is_design_file(&name) && cb_core::doc::template_info(&String::from_utf8_lossy(&bytes)).is_some() => templates.push((name, bytes)),
                 Ok(bytes) => self.open_dropped(&name, bytes, now),
                 Err(e) => self.say(format!("Couldn't read {name}: {e}"), now),
             }
+        }
+        #[cfg(target_arch = "wasm32")]
+        if !templates.is_empty() {
+            self.import_templates(templates, now);
         }
     }
 
@@ -851,6 +867,8 @@ impl eframe::App for CardBuilderApp {
         self.shortcuts(&ctx, now);
         self.dropped_files(&ctx, now);
         self.take_picked(now);
+        #[cfg(target_arch = "wasm32")]
+        self.browser_templates_frame(now);
         self.fix_selection();
         self.poll_exports(now);
         if self.viewer.snapshot_pending {
@@ -900,6 +918,8 @@ impl eframe::App for CardBuilderApp {
         self.print_dialog(&ctx, now);
         self.save_changes_dialog(&ctx, now);
         self.preferences_dialog(&ctx, now);
+        #[cfg(target_arch = "wasm32")]
+        self.template_name_dialog(&ctx, now);
         #[cfg(not(target_arch = "wasm32"))]
         self.assistant_overlays(&ctx, now);
         self.update_window_title(&ctx);

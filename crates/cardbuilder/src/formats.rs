@@ -60,7 +60,7 @@ fn thumb(ui: &Ui, r: Rect, w: f64, h: f64, radius: f64, fold: Fold, on: bool) {
 }
 
 /// one card in the picker: a to-scale picture, the name and a note
-fn item_row(ui: &mut Ui, name: &str, note: &str, shape: (f64, f64, f64, Fold), on: bool, indent: bool, picture: Option<egui::TextureId>) -> bool {
+fn item_row(ui: &mut Ui, name: &str, note: &str, shape: (f64, f64, f64, Fold), on: bool, indent: bool, picture: Option<egui::TextureId>) -> egui::Response {
     let x0 = if indent { 14.0 } else { 0.0 };
     let (r, resp) = ui.allocate_exact_size(vec2(326.0, 46.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
@@ -89,7 +89,7 @@ fn item_row(ui: &mut Ui, name: &str, note: &str, shape: (f64, f64, f64, Fold), o
     if on {
         ui.painter().text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, icon(Icon::Check), FontId::new(14.0, icons()), P.accent);
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// a group's heading in the picker: click to open or close it
@@ -118,6 +118,8 @@ impl CardBuilderApp {
         // a card picked from the list (not a turn or a custom size)
         let mut picked: Option<CardFormat> = None;
         let mut pick_template: Option<std::path::PathBuf> = None;
+        #[cfg(target_arch = "wasm32")]
+        let mut remove_template: Option<std::path::PathBuf> = None;
         let mut gap_x = 0.0;
         let row = ui.horizontal_top(|ui| {
             // ---- categories
@@ -211,9 +213,18 @@ impl CardBuilderApp {
                             let path = t.path.clone();
                             let picture = self.thumbs.get(ui.ctx(), &key, || crate::thumbs::Source::File(path));
                             let top = ui.cursor().top();
-                            if item_row(ui, &t.info.name, &t.info.note, (t.format.w, t.format.h, t.format.radius, t.format.fold), on, true, picture) && !on {
+                            let resp = item_row(ui, &t.info.name, &t.info.note, (t.format.w, t.format.h, t.format.radius, t.format.fold), on, true, picture);
+                            if resp.clicked() && !on {
                                 pick_template = Some(t.path.clone());
                             }
+                            // the browser's templates can go again (right-click, or a long press)
+                            #[cfg(target_arch = "wasm32")]
+                            resp.context_menu(|ui| {
+                                if ui.button("Remove from this browser").clicked() {
+                                    remove_template = Some(t.path.clone());
+                                    ui.close();
+                                }
+                            });
                             if on {
                                 current_row = Some(Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top()));
                             }
@@ -229,9 +240,21 @@ impl CardBuilderApp {
                             ui.scroll_to_rect(r, Some(egui::Align::Center));
                         }
                     }
-                    if cat != Category::Custom && self.templates.iter().all(|t| t.category() != cat) {
+                    let none_here = self.templates.iter().all(|t| t.category() != cat);
+                    if cat != Category::Custom && cfg!(not(target_arch = "wasm32")) && none_here {
                         ui.add_space(4.0);
                         crate::widgets::hint(ui, "Export › Save as template… keeps your own designs here.");
+                    }
+                    if cat != Category::Custom && cfg!(target_arch = "wasm32") {
+                        ui.add_space(4.0);
+                        crate::widgets::hint(
+                            ui,
+                            if none_here {
+                                "Drop .cb template files here, or use Export › Import templates…; Save as template… keeps your own designs. They stay in this browser."
+                            } else {
+                                "Templates stay in this browser: right-click one to remove it. Drop .cb files here to add more."
+                            },
+                        );
                     }
                 });
             });
@@ -279,6 +302,10 @@ impl CardBuilderApp {
             self.popups.format_top = false;
             self.request_template(path, now);
         }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(path) = remove_template {
+            self.remove_template(&path, now);
+        }
     }
 
     /// a built-in size in the picker; true when clicked (and not already the current one)
@@ -288,7 +315,7 @@ impl CardBuilderApp {
         let (w, h) = if on { (cur.w, cur.h) } else { (p.w, p.h) };
         // cards in a group are designs of their own: show their front
         let picture = if p.group.is_some() && (w - p.w).abs() < 1e-9 { self.thumbs.get(ui.ctx(), p.id, || crate::thumbs::Source::Preset(p)) } else { None };
-        item_row(ui, p.name, p.note, (w, h, p.radius, p.fold), on, p.group.is_some(), picture) && !on
+        item_row(ui, p.name, p.note, (w, h, p.radius, p.fold), on, p.group.is_some(), picture).clicked() && !on
     }
 
     /// width, height, fold and corners typed in; returns the format when applied

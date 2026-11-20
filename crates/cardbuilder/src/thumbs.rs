@@ -33,7 +33,7 @@ pub struct Thumbs {
 fn render(src: Source) -> Option<(u32, u32, Vec<u8>)> {
     let doc = match src {
         Source::Preset(p) => Some(default_doc(CardFormat::from_preset(p))),
-        Source::File(path) => std::fs::read_to_string(path).ok().and_then(|t| load_design(&t).ok()),
+        Source::File(path) => crate::templates::read_text(&path).ok().and_then(|t| load_design(&t).ok()),
     }?;
     let mut imgs = cb_print::ImageCache::default();
     imgs.prepare(cb_print::image_srcs(&doc));
@@ -42,10 +42,9 @@ fn render(src: Source) -> Option<(u32, u32, Vec<u8>)> {
     Some((pm.width(), pm.height(), pm.take()))
 }
 
-/// a key that changes when a template file is saved again
+/// a key that changes when a template is saved again
 pub fn file_key(path: &std::path::Path) -> String {
-    let stamp = std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis()).unwrap_or(0);
-    format!("{}@{stamp}", path.display())
+    format!("{}@{}", path.display(), crate::templates::stamp(path))
 }
 
 impl Thumbs {

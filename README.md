@@ -120,8 +120,11 @@ same app, built for WebAssembly. A few things work the browser's way:
 - **Saving** downloads the `.cb` design (and exports their PDF or PNG) to your downloads folder;
   **Open** brings a design back in, and you can also drop `.cb` files, pictures and CSV files
   onto the page. The design you're working on is kept in the browser between visits.
-- **Templates** live in a folder on the computer, so *Save as template* is in the desktop app only,
-  and so is the **Assistant** (a web page can't let agents connect).
+- **Templates** are kept in the browser: drop `.cb` template files on the page (or use
+  *Export › Import templates…*) and they show in the card picker as on the desktop; *Save as
+  template…* keeps your own there, and right-clicking one in the picker removes it. They stay in
+  that browser only, and clearing the site's data removes them.
+- The **Assistant** is in the desktop app only (a web page can't let agents connect).
 - The **3D preview** needs WebGPU or WebGL 2 (any current Chrome, Edge, Firefox or Safari), and
   big exports take a moment longer than on the desktop.
 

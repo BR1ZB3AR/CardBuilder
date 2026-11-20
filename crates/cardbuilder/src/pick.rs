@@ -23,6 +23,8 @@ pub(crate) enum PickFor {
     Data,
     /// a font file, for the text layer with this id
     Font(String),
+    /// a template to keep in the browser (web only; several can be picked at once)
+    Template,
 }
 
 /// a picked file: what it's for, its name, its bytes
@@ -75,13 +77,37 @@ impl CardBuilderApp {
         }
     }
 
+    /// Import templates… (web): pick any number of `.cb` files; they come back through the inbox
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn pick_templates(&mut self) {
+        let dialog = rfd::AsyncFileDialog::new().add_filter("CardBuilder template", &[cb_core::doc::CB_EXT]).set_title("Import templates");
+        let (items, ctx) = (self.picks.items.clone(), self.picks.ctx.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            let Some(files) = dialog.pick_files().await else { return };
+            let mut read = Vec::new();
+            for f in files {
+                read.push((PickFor::Template, f.file_name(), f.read().await));
+            }
+            // all together, so they are added as one batch
+            items.lock().unwrap().extend(read);
+            ctx.request_repaint();
+        });
+    }
+
     /// handle the files the browser has handed over since the last frame
     pub(crate) fn take_picked(&mut self, now: f64) {
         #[cfg(target_arch = "wasm32")]
         {
             let arrived: Vec<_> = self.picks.items.lock().unwrap().drain(..).collect();
+            let mut templates = Vec::new();
             for (what, name, bytes) in arrived {
-                self.picked(what, &name, bytes, now);
+                match what {
+                    PickFor::Template => templates.push((name, bytes)),
+                    what => self.picked(what, &name, bytes, now),
+                }
+            }
+            if !templates.is_empty() {
+                self.import_templates(templates, now);
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -109,6 +135,7 @@ impl CardBuilderApp {
                     });
                 }
             }
+            PickFor::Template => self.import_templates(vec![(name.to_string(), bytes)], now),
         }
     }
 }
