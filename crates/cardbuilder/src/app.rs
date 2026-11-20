@@ -96,6 +96,8 @@ pub struct Prefs {
     pub accent: Option<String>,
     /// the .cb file being edited when the app last closed
     pub last_file: Option<String>,
+    /// Preferences › Assistant
+    pub assistant: crate::assistant::AssistantPrefs,
 }
 impl Default for Prefs {
     fn default() -> Self {
@@ -112,6 +114,7 @@ impl Default for Prefs {
             theme_dark: "card-studio".into(),
             accent: None,
             last_file: None,
+            assistant: Default::default(),
         }
     }
 }
@@ -128,6 +131,9 @@ pub struct Popups {
     pub theme_mode: Option<bool>,
     /// 0 standard, 1 liquid glass, 2 cyberpunk, 3 high contrast
     pub theme_kind: Option<u8>,
+    /// Preferences and the page it shows
+    pub prefs: bool,
+    pub prefs_page: crate::preferences::PrefsPage,
     /// card category shown in the format picker
     pub format_cat: Option<cb_core::format::Category>,
     /// groups opened or closed in the format picker (by name)
@@ -159,6 +165,12 @@ pub struct CardBuilderApp {
     pub(crate) viewer: crate::view3d::Viewer3d,
     pub(crate) jobs: crate::exports::Jobs,
     pending_files: Arc<Mutex<Vec<(String, Result<Vec<u8>, String>)>>>,
+    /// AI agents (the MCP server, approvals, the agent's pointer)
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) assistant: crate::assistant::Assistant,
+    /// where the Assistant button is (its panel opens under it)
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) assistant_anchor: egui::Rect,
     /// files picked in the browser's file chooser, on their way in
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) picks: crate::pick::Inbox,
@@ -223,6 +235,8 @@ impl CardBuilderApp {
             jobs: Default::default(),
             pending_files: Default::default(),
             picks: crate::pick::Inbox::new(&cc.egui_ctx),
+            assistant: crate::assistant::Assistant::new(&cc.egui_ctx),
+            assistant_anchor: egui::Rect::NOTHING,
             applied_theme: None,
             top_density: crate::topbar::Density::Full,
             file,
@@ -495,6 +509,19 @@ impl CardBuilderApp {
     pub fn camera_for_tests(&self) -> (f64, f64, f64) {
         self.viewer.camera()
     }
+    /// let agents connect on `port` (tests drive the Assistant over real HTTP)
+    pub fn enable_agents_for_tests(&mut self, port: u16) {
+        self.prefs.assistant.show_ai = true;
+        self.prefs.assistant.mcp = true;
+        self.prefs.assistant.port = port;
+    }
+    /// an agent's call waits for the user's answer
+    pub fn agent_waiting_for_tests(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.assistant.pending.is_some();
+        #[cfg(target_arch = "wasm32")]
+        false
+    }
     pub fn set_side_for_tests(&mut self, back: bool) {
         self.side = if back { Side::Back } else { Side::Front };
     }
@@ -564,6 +591,10 @@ impl CardBuilderApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context, now: f64) {
         let sc = |m: Modifiers, k: Key| KeyboardShortcut::new(m, k);
+        let prefs = ctx.input_mut(|i| i.consume_shortcut(&sc(Modifiers::COMMAND, Key::Comma)));
+        if prefs {
+            self.popups.prefs = true;
+        }
         let (redo, redo2, undo, open, save_as, save, new, print) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&sc(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)),
@@ -826,6 +857,8 @@ impl eframe::App for CardBuilderApp {
             // the browser reads the snapshot back in its own time: keep looking for it
             ctx.request_repaint();
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.assistant_frame(&ctx, now);
         self.apply_theme(&ctx);
         self.sync_design_fonts(&ctx);
         // background rendering: the editor's card image and the 3D textures
@@ -866,6 +899,9 @@ impl eframe::App for CardBuilderApp {
         self.windows(&ctx, now);
         self.print_dialog(&ctx, now);
         self.save_changes_dialog(&ctx, now);
+        self.preferences_dialog(&ctx, now);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.assistant_overlays(&ctx, now);
         self.update_window_title(&ctx);
         self.toast(&ctx, now);
         if crate::titlebar::ENABLED {

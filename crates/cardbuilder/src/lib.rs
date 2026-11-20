@@ -1,6 +1,7 @@
 //! CardBuilder app crate: the desktop app (egui + wgpu) on top of cb-core and cb-print.
 
 mod app;
+mod assistant;
 mod canvas;
 mod changelog;
 pub(crate) mod exports;
@@ -9,6 +10,7 @@ mod formats;
 pub mod gpu;
 mod panes;
 mod pick;
+mod preferences;
 mod sidebar;
 mod style;
 mod templates;

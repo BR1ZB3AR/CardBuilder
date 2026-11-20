@@ -47,7 +47,50 @@ bleed, crop marks and the backs lined up for double-sided printing.
   A design can offer a choice as coloured buttons (say, a faction: RES, ENL or XFAC), each
   showing its own layers and setting colours.
 - **Design files:** `.cb` files with pictures, fonts and data inside; New, Open, Save, undo for everything.
+- **Assistant (desktop):** AI agents such as Claude Code or Gemini CLI design with you over
+  [MCP](https://modelcontextprotocol.io). CardBuilder listens on this computer only
+  (`http://127.0.0.1:27879/mcp`, off until you turn it on in Preferences › Assistant). Agents can read the
+  design, add and change layers, look at the card and export it. You choose what they may do
+  without asking, every change is one Ctrl+Z away, and a pointer shows what the agent is working on.
 - 31 themes, a custom title bar, and a layout that adapts down to small windows.
+
+## Preferences and the Assistant
+
+The gear in the top bar (or **Ctrl+,**) opens Preferences: settings for CardBuilder on this
+computer.
+
+<p align="center">
+  <img src="docs/preferences-assistant.png" alt="Preferences, Assistant page: Show AI features and the Assistant button switched on, the Make edits permission chosen between Ask first and Do everything, Claude Code connected, and the lines that connect Claude Code or Gemini CLI to CardBuilder" width="620">
+</p>
+
+**Assistant** (desktop app): AI agents such as Claude Code or Gemini CLI design with you over
+[MCP](https://modelcontextprotocol.io). They read the design, add and change layers, set
+backgrounds, the card size and the data, look at the card, and open, save or export, while a
+pointer shows what they are working on. You choose what they may do without asking:
+
+- **Ask first:** every change waits for your OK.
+- **Make edits:** changes go ahead, and opening, saving and exporting ask.
+- **Do everything:** nothing asks.
+
+When an agent asks, a card shows what it wants, with *Allow*, *Always allow* and *Deny*. Every
+change it makes is one Ctrl+Z away. To connect one:
+
+1. In Preferences › Assistant, tick **Let AI agents connect**. CardBuilder then listens on this
+   computer only, at `http://127.0.0.1:27879/mcp`, and web pages can't reach it.
+2. Add CardBuilder to your agent once. For Claude Code:
+   ```sh
+   claude mcp add --transport http --scope user cardbuilder http://127.0.0.1:27879/mcp
+   ```
+   Preferences shows the line for Gemini CLI and a JSON entry for other MCP clients.
+3. Ask your agent for a card. *Custom instructions* in Preferences tell it how you like to work.
+
+<p align="center">
+  <img src="docs/preferences-graphics.png" alt="Preferences, Graphics card page: the NVIDIA GeForce RTX 2060 draws CardBuilder through Vulkan, with a menu to choose another card" width="620">
+</p>
+
+**Graphics card:** which graphics card draws the window and the 3D preview, every card
+CardBuilder found, and a choice for the next start (for a laptop with two, or when a driver
+misbehaves).
 
 ## In your browser
 
@@ -59,7 +102,8 @@ same app, built for WebAssembly. A few things work the browser's way:
 - **Saving** downloads the `.cb` design (and exports their PDF or PNG) to your downloads folder;
   **Open** brings a design back in, and you can also drop `.cb` files, pictures and CSV files
   onto the page. The design you're working on is kept in the browser between visits.
-- **Templates** live in a folder on the computer, so *Save as template* is in the desktop app only.
+- **Templates** live in a folder on the computer, so *Save as template* is in the desktop app only,
+  and so is the **Assistant** (a web page can't let agents connect).
 - The **3D preview** needs WebGPU or WebGL 2 (any current Chrome, Edge, Firefox or Safari), and
   big exports take a moment longer than on the desktop.
 

@@ -1,6 +1,6 @@
 [package]
 name = "cardbuilder"
-version = "0.0.14"
+version = "0.0.15"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -27,6 +27,7 @@ rfd = "0.18.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11"
+tiny_http = "0.12" # the Assistant's MCP server (127.0.0.1 only)
 
 # the web version (trunk build): files come and go through the browser
 [target.'cfg(target_arch = "wasm32")'.dependencies]

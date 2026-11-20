@@ -129,6 +129,25 @@ fn mime_of(name: &str) -> &'static str {
     }
 }
 
+/// the bytes of export `e` (not the 3D snapshot, which the graphics card makes) and a note for
+/// the message ("· 12 cards")
+pub(crate) fn make_export(doc: &Doc, e: Export, record: Option<usize>, imgs: &ImageCache, progress: &dyn Fn(f32)) -> Result<(Vec<u8>, String), String> {
+    match e {
+        Export::Png { side } => Ok((cb_print::sheets::side_png(doc, side, record, 300.0, true, imgs)?, " · 300 dpi with bleed".into())),
+        Export::CardPdf => {
+            let records: Vec<Option<usize>> = if doc.data.is_empty() { vec![None] } else { (0..doc.data.rows.len()).map(Some).collect() };
+            let pdf = cb_print::sheets::cards_pdf(doc, &records, imgs, progress)?;
+            Ok((pdf, format!(" · {} card{}", records.len(), if records.len() == 1 { "" } else { "s" })))
+        }
+        Export::PrintSheets => {
+            let (pdf, s) = cb_print::sheets::print_sheets_pdf(doc, imgs, progress)?;
+            Ok((pdf, format!(" · {} card{} on {} sheet{} ({} per sheet, {} pages)", s.cards, if s.cards == 1 { "" } else { "s" }, s.sheets, if s.sheets == 1 { "" } else { "s" }, s.per_sheet, s.pages)))
+        }
+        Export::Csv => Ok((cb_core::data::to_csv(&doc.data).into_bytes(), String::new())),
+        Export::Snapshot => Err("the 3D snapshot is made by the graphics card: use Export › 3D snapshot".into()),
+    }
+}
+
 const PICTURES: [&str; 7] = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
 
 impl CardBuilderApp {
@@ -210,27 +229,11 @@ impl CardBuilderApp {
             }
             Export::Png { side } => {
                 let name = format!("{stem}-{}.png", self.doc.format.side_name(side).to_lowercase());
-                self.run_export(ctx, now, name, "Export picture", move |doc, imgs, _| Ok((cb_print::sheets::side_png(doc, side, record, 300.0, true, imgs)?, " · 300 dpi with bleed".into())));
+                self.run_export(ctx, now, name, "Export picture", move |doc, imgs, p| make_export(doc, e, record, imgs, p));
             }
-            Export::CardPdf => {
-                let name = format!("{stem}-cards.pdf");
-                self.run_export(ctx, now, name, "Export card PDF", |doc, imgs, progress| {
-                    let records: Vec<Option<usize>> = if doc.data.is_empty() { vec![None] } else { (0..doc.data.rows.len()).map(Some).collect() };
-                    let pdf = cb_print::sheets::cards_pdf(doc, &records, imgs, progress)?;
-                    Ok((pdf, format!(" · {} card{}", records.len(), if records.len() == 1 { "" } else { "s" })))
-                });
-            }
-            Export::PrintSheets => {
-                let name = format!("{stem}-print-sheets.pdf");
-                self.run_export(ctx, now, name, "Export print sheets", |doc, imgs, progress| {
-                    let (pdf, s) = cb_print::sheets::print_sheets_pdf(doc, imgs, progress)?;
-                    Ok((pdf, format!(" · {} card{} on {} sheet{} ({} per sheet, {} pages)", s.cards, if s.cards == 1 { "" } else { "s" }, s.sheets, if s.sheets == 1 { "" } else { "s" }, s.per_sheet, s.pages)))
-                });
-            }
-            Export::Csv => {
-                let name = format!("{stem}-data.csv");
-                self.run_export(ctx, now, name, "Export data", |doc, _, _| Ok((cb_core::data::to_csv(&doc.data).into_bytes(), String::new())));
-            }
+            Export::CardPdf => self.run_export(ctx, now, format!("{stem}-cards.pdf"), "Export card PDF", move |doc, imgs, p| make_export(doc, e, record, imgs, p)),
+            Export::PrintSheets => self.run_export(ctx, now, format!("{stem}-print-sheets.pdf"), "Export print sheets", move |doc, imgs, p| make_export(doc, e, record, imgs, p)),
+            Export::Csv => self.run_export(ctx, now, format!("{stem}-data.csv"), "Export data", move |doc, imgs, p| make_export(doc, e, record, imgs, p)),
         }
     }
 

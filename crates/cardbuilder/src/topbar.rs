@@ -63,7 +63,7 @@ fn text_w(ui: &Ui, text: &str, font: FontId) -> f32 {
 }
 
 /// widths of the left group, the right group and the layout switcher at density `d`
-fn bar_widths(ui: &Ui, d: Density, chip: &(String, String)) -> (f32, f32, f32) {
+fn bar_widths(ui: &Ui, d: Density, chip: &(String, String), extra_icons: usize) -> (f32, f32, f32) {
     let sx = ui.spacing().item_spacing.x;
     let mut left = vec![28.0];
     if d < Density::Short {
@@ -80,6 +80,8 @@ fn bar_widths(ui: &Ui, d: Density, chip: &(String, String)) -> (f32, f32, f32) {
         right.push(10.0);
     }
     right.push(30.0);
+    // Preferences, and the Assistant when it shows
+    right.extend(std::iter::repeat_n(30.0, extra_icons));
     let right_w = right.iter().sum::<f32>() + 6.0 * (right.len() as f32 - 1.0) + 4.0 + 4.0;
     (left_w, right_w, seg_size(ui, &mode_options(), false).x)
 }
@@ -109,6 +111,11 @@ pub(crate) fn menu_row(ui: &mut Ui, ic: Icon, title: &str, sub: &str, on: bool, 
 }
 
 impl CardBuilderApp {
+    /// the Assistant button is in the top bar (desktop, AI features and the button on)
+    fn assistant_button_shown(&self) -> bool {
+        cfg!(not(target_arch = "wasm32")) && self.prefs.assistant.show_ai && self.prefs.assistant.app_bar_button
+    }
+
     /// the format chip's two lines
     fn chip_lines(&self) -> (String, String) {
         (self.format_title().to_uppercase(), format!("{} · {}", self.doc.format.size_label(), self.doc.format.fold.label()).to_uppercase())
@@ -125,10 +132,11 @@ impl CardBuilderApp {
             full.max.x = bar.right() - crate::titlebar::WIDTH - 10.0;
         }
         let chip = self.chip_lines();
+        let extra_icons = 1 + usize::from(self.assistant_button_shown());
         let density = [Density::Full, Density::IconButtons, Density::Short, Density::Tight]
             .into_iter()
             .find(|&d| {
-                let (l, r, s) = bar_widths(ui, d, &chip);
+                let (l, r, s) = bar_widths(ui, d, &chip, extra_icons);
                 l + r + s + 2.0 * GROUP_GAP <= full.width()
             })
             .unwrap_or(Density::Tight);
@@ -243,6 +251,13 @@ impl CardBuilderApp {
                 }
                 if icon_button(ui, Icon::CircleQuestionMark, "Shortcuts & help (?)", true).clicked() {
                     self.popups.help = true;
+                }
+                if icon_button(ui, Icon::Settings, "Preferences (Ctrl+,)", true).clicked() {
+                    self.popups.prefs = true;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if self.assistant_button_shown() {
+                    self.assistant_button(ui);
                 }
             })
             .response

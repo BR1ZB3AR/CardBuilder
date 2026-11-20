@@ -150,7 +150,7 @@ impl CardBuilderApp {
         self.when_saved_or_discarded(After::Fresh(f), now);
     }
 
-    fn fresh_design(&mut self, f: cb_core::format::CardFormat, now: f64) {
+    pub(crate) fn fresh_design(&mut self, f: cb_core::format::CardFormat, now: f64) {
         let fresh = default_doc(f);
         let before = std::mem::replace(&mut self.doc, fresh.clone());
         self.history.record(&before, None, now);
@@ -239,20 +239,27 @@ impl CardBuilderApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn write_design(&mut self, path: PathBuf, now: f64) -> bool {
-        let text = save_cb(&self.doc, &format!("CardBuilder {VERSION}"));
-        match write_atomically(&path, &text) {
-            Ok(()) => {
-                self.prefs.last_file = Some(path.display().to_string());
-                self.file.path = Some(path);
-                self.file.baseline = self.doc.clone();
-                self.say(format!("Saved {}", self.file.name()), now);
-                true
-            }
+        match self.save_to(path, now) {
+            Ok(_) => true,
             Err(e) => {
-                self.say(format!("Couldn't save {}: {e}", path.display()), now);
+                self.say(e, now);
                 false
             }
         }
+    }
+
+    /// save the design into `path` (`.cb` added when missing), which becomes its file; where
+    /// it went, or what went wrong
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn save_to(&mut self, path: PathBuf, now: f64) -> Result<PathBuf, String> {
+        let path = with_cb_ext(path);
+        let text = save_cb(&self.doc, &format!("CardBuilder {VERSION}"));
+        write_atomically(&path, &text).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+        self.prefs.last_file = Some(path.display().to_string());
+        self.file.path = Some(path.clone());
+        self.file.baseline = self.doc.clone();
+        self.say(format!("Saved {}", self.file.name()), now);
+        Ok(path)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -305,7 +312,7 @@ impl CardBuilderApp {
         }
     }
 
-    fn open_design_text(&mut self, name: &str, text: &str, path: Option<PathBuf>, now: f64) -> bool {
+    pub(crate) fn open_design_text(&mut self, name: &str, text: &str, path: Option<PathBuf>, now: f64) -> bool {
         match load_design(text) {
             Ok(d) => {
                 let before = std::mem::replace(&mut self.doc, d.clone());

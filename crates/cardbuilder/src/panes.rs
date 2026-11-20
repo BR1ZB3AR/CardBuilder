@@ -267,9 +267,10 @@ impl CardBuilderApp {
             painter.rect(r, CornerRadius::same(12), if resp.hovered() { P.panel2 } else { P.chip }, Stroke::new(1.0, amber.gamma_multiply(0.6)), StrokeKind::Inside);
             painter.text(pos2(r.left() + 18.0, r.center().y), Align2::CENTER_CENTER, icon(Icon::TriangleAlert), FontId::new(12.0, icons()), amber);
             painter.galley(r.min + vec2(28.0, 5.0), g3, amber);
-            let tip = self.gpu.problem.clone().unwrap_or_else(|| "The 3D is slow or missing because no graphics card driver could be used. Click for Scene › Graphics card.".into());
+            let tip = self.gpu.problem.clone().unwrap_or_else(|| "The 3D is slow or missing because no graphics card driver could be used. Click for Preferences › Graphics card.".into());
             if resp.on_hover_text(tip).clicked() {
-                self.prefs.tab = crate::app::Tab::Scene;
+                self.popups.prefs = true;
+                self.popups.prefs_page = crate::preferences::PrefsPage::Graphics;
             }
         }
 

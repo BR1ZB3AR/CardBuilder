@@ -10,6 +10,17 @@ pub type Release = (
 
 pub const CHANGELOG: &[Release] = &[
     (
+        "0.0.15",
+        "2026-11-20",
+        "Preferences and the Assistant",
+        &[
+            ("new", "Preferences (the gear in the top bar, or Ctrl+,): settings for CardBuilder on this computer. The Graphics card settings moved here from the Scene tab."),
+            ("new", "The Assistant: AI agents such as Claude Code can design with you. Turn on Let AI agents connect, add CardBuilder to your agent with the line Preferences › Assistant gives you, and ask it for a card. It can read the design, add and change layers, set backgrounds, the card size and the data, look at the card, and open, save or export. Every change is one Ctrl+Z away."),
+            ("new", "You decide what an agent may do: Ask first, Make edits (changes go ahead, opening, saving and exporting ask) or Do everything. When it asks, a card shows what it wants, with Allow, Always allow and Deny."),
+            ("new", "The agent's pointer glides to whatever the agent works on, with its name beside it. The Assistant button in the top bar shows who is connected and what they did; custom instructions tell agents how you like to work."),
+        ],
+    ),
+    (
         "0.0.14",
         "2026-11-20",
         "CardBuilder in your browser",

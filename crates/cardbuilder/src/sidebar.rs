@@ -1160,11 +1160,10 @@ impl CardBuilderApp {
         if sc != self.doc.scene {
             self.edit(now, Some("scene"), |d| d.scene = sc);
         }
-        self.gpu_section(ui, now);
     }
 
-    /// Scene › Graphics card: what draws the 3D, every card found, and the choice for next start
-    fn gpu_section(&mut self, ui: &mut Ui, now: f64) {
+    /// Preferences › Graphics card: what draws the 3D, every card found, and the choice for next start
+    pub(crate) fn gpu_section(&mut self, ui: &mut Ui, now: f64) {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut restart = false;
         section(ui, "Graphics card", None, None, |ui| {
