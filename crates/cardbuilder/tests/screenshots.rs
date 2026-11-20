@@ -539,3 +539,32 @@ fn readme_preferences() {
     settle(&mut h);
     save(&mut h, "readme-preferences-graphics");
 }
+
+/// the README's theme pictures: the Theme menu, then the app in four themes picked through it
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn readme_themes() {
+    let mut h = harness(1600.0, 1000.0);
+    let mut doc = cb_core::doc::default_doc(cb_core::format::CardFormat::from_preset(cb_core::format::preset("bc-round").unwrap()));
+    doc.paper = cb_core::doc::Paper { stock: cb_core::doc::Stock::Gloss, color: "#ffffff".into() };
+    h.state_mut().open_json("cards.cb", &cb_core::doc::save_cb(&doc, "test"));
+    settle(&mut h);
+    h.get_by_label("Theme").click();
+    h.event(egui::Event::PointerGone);
+    settle(&mut h);
+    save(&mut h, "readme-themes-menu");
+    // (filter chip, theme): the chip narrows the gallery so the theme is in view (the filters
+    // reset when the menu closes)
+    for (chip, theme) in [("Light", "Daylight"), ("Liquid glass", "Liquid Glass"), ("Cyberpunk", "Cyberpunk Magenta"), ("High contrast", "High Contrast Amber")] {
+        h.get_all_by_label(chip).next().unwrap().click();
+        settle(&mut h);
+        h.get_all_by_label(theme).next().unwrap().click();
+        settle(&mut h);
+        h.key_press(egui::Key::Escape);
+        h.event(egui::Event::PointerGone);
+        settle(&mut h);
+        save(&mut h, &format!("readme-themes-{}", theme.to_lowercase().replace(' ', "-")));
+        h.get_by_label("Theme").click();
+        settle(&mut h);
+    }
+}

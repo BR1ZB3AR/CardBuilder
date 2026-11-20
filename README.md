@@ -52,7 +52,7 @@ bleed, crop marks and the backs lined up for double-sided printing.
   (`http://127.0.0.1:27879/mcp`, off until you turn it on in Preferences › Assistant). Agents can read the
   design, add and change layers, look at the card and export it. You choose what they may do
   without asking, every change is one Ctrl+Z away, and a pointer shows what the agent is working on.
-- 31 themes, a custom title bar, and a layout that adapts down to small windows.
+- [31 themes](#themes), a custom title bar, and a layout that adapts down to small windows.
 
 ## Preferences and the Assistant
 
@@ -91,6 +91,24 @@ change it makes is one Ctrl+Z away. To connect one:
 **Graphics card:** which graphics card draws the window and the 3D preview, every card
 CardBuilder found, and a choice for the next start (for a laptop with two, or when a driver
 misbehaves).
+
+## Themes
+
+**Theme** in the top bar changes how CardBuilder looks: 31 themes, light and dark, frosted
+*liquid glass*, *cyberpunk* neon and *high contrast*, each shown as a small picture of the app.
+The chips at the top narrow the list, *Accent colour* puts your own colour on the buttons and
+highlights, and *Follow system* switches between a light and a dark theme of your choice with your
+computer's setting.
+
+<p align="center">
+  <img src="docs/themes-menu.png" alt="The Theme menu: One theme or Follow system, filter chips (Light 9, Dark 22, Standard 18, Liquid glass 5, Cyberpunk 4, High contrast 4), a gallery of theme pictures with Card Studio chosen, and the accent colours" width="440">
+</p>
+
+<p align="center">
+  <img src="docs/themes.png" alt="The same business card in CardBuilder with four themes: Daylight, Liquid Glass, Cyberpunk Magenta and High Contrast Amber" width="820">
+  <br>
+  <sub>Top: Daylight, Liquid Glass. Bottom: Cyberpunk Magenta, High Contrast Amber.</sub>
+</p>
 
 ## In your browser
 
